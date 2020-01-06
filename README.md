@@ -30,20 +30,33 @@ i2c.readfrom_mem(52, 0x12, 1) #Read Byte 12
     b'\x13' # 0b10011 -> DCDC enabled but LDO3/2 disabled
 i2c.writeto_mem(52, 0x12, b'\x1f') # enable LDO3/2 (TFT and TFT_LED)
    
-
+i2c.writeto_mem(52, 0x12, b'\x13') #disable LDO3/2 (TFT and TFT_LED)
 
 
 
 https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo
 
-tft.init(tft.M5STACK, width=160, height=80, rst_pin=18, mosi=15, miso=32, clk=13, cs=5, dc=23)
-lcd = lcd.TFT()
-lcd.init(lcd.M5STACK, width=160, height=80, speed=40000000, rst_pin=18, 
-         miso=32, mosi=15, clk=13, cs=5, dc=23, bgr=True,invrot=3, 
-         expwm=machine.PWM(32, duty=0, timer=1))
-lcd.setBrightness(30)
-lcd.clear()
-lcd.setColor(0xCCCCCC)
+import display
+tft = display.TFT()
+tft.init(tft.M5STACK, width=120, height=160, rst_pin=18, mosi=15, miso=32, clk=13, cs=5, dc=23, bgr=False, invrot=1, rot=tft.LANDSCAPE, hastouch=False)
+tft.clear(tft.BLUE)
+tft.text(tft.CENTER, tft.CENTER, 'Hello World' , tft.RED)
 
 
 
+
+
+
+tft.clear(tft.RED)
+
+tft.clear(tft.BLUE)
+
+ 
+tft.text(0, 25, 'Hello World' , tft.RED)
+
+tft.text(0, tft.CENTER, 'Hello World' , tft.RED)
+tft.text(tft.CENTER, 0, 'Hello World' , tft.RED)
+
+tft.deinit()
+
+tft.setwin(10,10, 160,80)
