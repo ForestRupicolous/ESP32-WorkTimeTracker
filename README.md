@@ -31,22 +31,27 @@ i2c.readfrom_mem(52, 0x12, 1) #Read Byte 12
 i2c.writeto_mem(52, 0x12, b'\x1f') # enable LDO3/2 (TFT and TFT_LED)
    
 i2c.writeto_mem(52, 0x12, b'\x13') #disable LDO3/2 (TFT and TFT_LED)
-
+i2c.writeto_mem(52, 0x28, b'\x9c') #Dimm display
 
 
 https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo
 
 import display
 tft = display.TFT()
-tft.init(tft.M5STACK, width=120, height=160, rst_pin=18, mosi=15, miso=32, clk=13, cs=5, dc=23, bgr=False, invrot=1, rot=tft.LANDSCAPE, hastouch=False)
+tft.init(tft.M5STACK, width=120, height=160, rst_pin=18, mosi=15, miso=32, clk=13, cs=5, dc=23, bgr=False, invrot=1, rot=tft.LANDSCAPE_FLIP, hastouch=False) #
 tft.clear(tft.BLUE)
 tft.text(tft.CENTER, tft.CENTER, 'Hello World' , tft.RED)
 
 
+for x in range(0,120,10):
+    tft.line(x+1, x+26, x+15, x+26, tft.GREEN)
+
+#display goes from 1,26 to 
+tft.rect(1, 26, 159, 80, tft.RED, tft.GREEN)
 
 
-
-
+tft.setwin(1,26, 160,80)
+ 
 tft.clear(tft.RED)
 
 tft.clear(tft.BLUE)
@@ -59,4 +64,3 @@ tft.text(tft.CENTER, 0, 'Hello World' , tft.RED)
 
 tft.deinit()
 
-tft.setwin(10,10, 160,80)
