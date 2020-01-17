@@ -19,7 +19,7 @@ Idea: Duplicate I2C commands in Python:
 Adress from code: 0x34 = 52
 
 Enable
-
+## PMIC
 from machine import I2C
 i2c = I2C(freq=400000, sda=21, scl=22) #Enable I2C
 i2c.scan()  #Check for devices
@@ -36,6 +36,61 @@ i2c.writeto_mem(52, 0x28, b'\x9c') #Dimm display
 
 https://github.com/loboris/MicroPython_ESP32_psRAM_LoBo
 
+## MPU6886
+#Address from cpp code is 0x68 = 104
+#define MPU6886_ADDRESS           0x68 
+#define MPU6886_WHOAMI            0x75
+#define MPU6886_ACCEL_INTEL_CTRL  0x69
+#define MPU6886_SMPLRT_DIV        0x19
+#define MPU6886_INT_PIN_CFG       0x37
+#define MPU6886_INT_ENABLE        0x38
+#define MPU6886_ACCEL_XOUT_H      0x3B
+#define MPU6886_ACCEL_XOUT_L      0x3C
+#define MPU6886_ACCEL_YOUT_H      0x3D
+#define MPU6886_ACCEL_YOUT_L      0x3E
+#define MPU6886_ACCEL_ZOUT_H      0x3F
+#define MPU6886_ACCEL_ZOUT_L      0x40
+
+#define MPU6886_TEMP_OUT_H        0x41
+#define MPU6886_TEMP_OUT_L        0x42
+
+#define MPU6886_GYRO_XOUT_H       0x43
+#define MPU6886_GYRO_XOUT_L       0x44
+#define MPU6886_GYRO_YOUT_H       0x45
+#define MPU6886_GYRO_YOUT_L       0x46
+#define MPU6886_GYRO_ZOUT_H       0x47
+#define MPU6886_GYRO_ZOUT_L       0x48
+
+#define MPU6886_USER_CTRL         0x6A
+#define MPU6886_PWR_MGMT_1        0x6B
+#define MPU6886_PWR_MGMT_2        0x6C
+#define MPU6886_CONFIG            0x1A
+#define MPU6886_GYRO_CONFIG       0x1B
+#define MPU6886_ACCEL_CONFIG      0x1C
+#define MPU6886_ACCEL_CONFIG2     0x1D
+#define MPU6886_FIFO_EN           0x23
+
+from mpu6886 import MPU6886
+mpu = MPU6886(i2c, accel_sf=MPU6886.SF_G)
+mpu.gyro
+
+
+i2c.readfrom_mem(104, 0x75, 2) #whoAmI should return 0x19
+i2c.writeto_mem(104, 0x6B, b'\x00') #pwr mgmt
+#wait(10)
+i2c.writeto_mem(104, 0x6B, b'\x80') #pwr mgmt
+#wait(10)
+i2c.writeto_mem(104, 0x6B, b'\x01') #pwr mgmt
+
+i2c.writeto_mem(104, 0x6B, b'\x00') #pwr mgmt
+i2c.readfrom_mem(104, 0x3B, 8) #Read temperature from MPU6886
+
+
+
+i2c.writeto_mem(104, 0x28, b'\xcc')
+
+
+## DISPLAY
 import display
 tft = display.TFT()
 tft.init(tft.M5STACK, width=120, height=160, rst_pin=18, mosi=15, miso=32, clk=13, cs=5, dc=23, bgr=False, invrot=1, rot=tft.LANDSCAPE_FLIP, hastouch=False) #
