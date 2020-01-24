@@ -114,10 +114,13 @@ tft.clear(tft.BLUE)
  
 tft.text(0, 25, 'Hello World' , tft.RED)
 
-tft.text(0, tft.CENTER, 'Hello World' , tft.RED)
+tft.text(10, tft.CENTER, 'Hello World' , tft.GREEN)
 tft.text(tft.CENTER, 0, 'Hello World' , tft.RED)
 
 tft.deinit()
+
+tft.clear()
+tft.text(tft.CENTER, tft.CENTER, mpu.get_dir() , tft.GREEN)
 
 # IMU
 acc = mpu.acc
@@ -139,3 +142,227 @@ elif 0.9 < mpu.acc[0] < 1.1:
 
 # Upload 
 ampy -p /dev/ttyUSB0 put /home/martinkorinek/projekte/WorkTimeTracker/M5StickC_MicroPython/MicroPython_BUILD/components/micropython/esp32/modules/mpu6886.py
+
+>>> help(tft)
+
+object TFT   (160x120, Type=M5STACK, Ready: yes, Color mode: 24-bit, Clk=10000000 Hz, RdClk=1000000 Hz, Touch: no)
+
+Pins  (miso=32, mosi=15, clk=13, cs=5, dc=23, reset=18, backlight=-1) is of type TFT
+
+  init -- <function>
+
+  deinit -- <function>
+
+  pixel -- <function>
+
+  line -- <function>
+
+  lineByAngle -- <function>
+
+  triangle -- <function>
+
+  circle -- <function>
+
+  ellipse -- <function>
+
+  arc -- <function>
+
+  polygon -- <function>
+
+  rect -- <function>
+
+  roundrect -- <function>
+
+  clear -- <function>
+
+  fill -- <function>
+
+  clearwin -- <function>
+
+  font -- <function>
+
+  fontSize -- <function>
+
+  text -- <function>
+
+  orient -- <function>
+
+  textWidth -- <function>
+
+  textClear -- <function>
+
+  attrib7seg -- <function>
+
+  image -- <function>
+
+  compileFont -- <function>
+
+  hsb2rgb -- <function>
+
+  setwin -- <function>
+
+  resetwin -- <function>
+
+  savewin -- <function>
+
+  restorewin -- <function>
+
+  screensize -- <function>
+
+  winsize -- <function>
+
+  get_fg -- <function>
+
+  get_bg -- <function>
+
+  set_fg -- <function>
+
+  set_bg -- <function>
+
+  text_x -- <function>
+
+  text_y -- <function>
+
+  setColor -- <function>
+
+  print -- <function>
+
+  println -- <function>
+
+  setRotation -- <function>
+
+  setTextColor -- <function>
+
+  setCursor -- <function>
+
+  getCursor -- <function>
+
+  fillScreen -- <function>
+
+  drawPixel -- <function>
+
+  drawLine -- <function>
+
+  drawRect -- <function>
+
+  fillRect -- <function>
+
+  drawCircle -- <function>
+
+  fillCircle -- <function>
+
+  drawTriangle -- <function>
+
+  fillTriangle -- <function>
+
+  drawRoundRect -- <function>
+
+  fillRoundRect -- <function>
+
+  setBrightness -- <function>
+
+  backlight -- <function>
+
+  qrcode -- <function>
+
+  tft_setspeed -- <function>
+
+  tft_select -- <function>
+
+  tft_deselect -- <function>
+
+  tft_writecmd -- <function>
+
+  tft_writecmddata -- <function>
+
+  tft_readcmd -- <function>
+
+  M5STACK -- 6
+
+  CENTER -- -9003
+
+  RIGHT -- -9004
+
+  BOTTOM -- -9004
+
+  LASTX -- 7000
+
+  LASTY -- 8000
+
+  PORTRAIT -- 0
+
+  LANDSCAPE -- 1
+
+  PORTRAIT_FLIP -- 2
+
+  LANDSCAPE_FLIP -- 3
+
+  FONT_Default -- 0
+
+  FONT_DejaVu18 -- 1
+
+  FONT_DejaVu24 -- 2
+
+  FONT_Ubuntu -- 3
+
+  FONT_Comic -- 4
+
+  FONT_Minya -- 5
+
+  FONT_Tooney -- 6
+
+  FONT_Small -- 7
+
+  FONT_DefaultSmall -- 8
+
+  FONT_7seg -- 9
+
+  BLACK -- 0
+
+  NAVY -- 128
+
+  DARKGREEN -- 32768
+
+  DARKCYAN -- 32896
+
+  MAROON -- 8388608
+
+  PURPLE -- 8388736
+
+  OLIVE -- 8421376
+
+  LIGHTGREY -- 12632256
+
+  DARKGREY -- 8421504
+
+  BLUE -- 255
+
+  GREEN -- 65280
+
+  CYAN -- 65535
+
+  RED -- 16515072
+
+  MAGENTA -- 16515327
+
+  YELLOW -- 16579584
+
+  WHITE -- 16579836
+
+  ORANGE -- 16557056
+
+  GREENYELLOW -- 11336748
+
+  PINK -- 16564426
+
+  COLOR_BITS16 -- 16
+
+  COLOR_BITS24 -- 24
+
+  JPG -- 1
+
+  BMP -- 2
+
+  HSPI -- 1
+
+  VSPI -- 2
