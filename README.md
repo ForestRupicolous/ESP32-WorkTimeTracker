@@ -119,3 +119,23 @@ tft.text(tft.CENTER, 0, 'Hello World' , tft.RED)
 
 tft.deinit()
 
+# IMU
+acc = mpu.acc
+import math
+vec = math.sqrt(sum([x*x for x in mpu.acc])) <1.1
+
+vec = 0
+for i in range (0, 10):
+    vec = vec + math.sqrt(sum([x*x for x in mpu.acc]))
+vec/10
+
+if vec < 1.1:
+
+if -1.1 < mpu.acc[0] < -0.9:
+    print('x')
+elif 0.9 < mpu.acc[0] < 1.1:
+    print('-x')
+
+
+# Upload 
+ampy -p /dev/ttyUSB0 put /home/martinkorinek/projekte/WorkTimeTracker/M5StickC_MicroPython/MicroPython_BUILD/components/micropython/esp32/modules/mpu6886.py
