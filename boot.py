@@ -1,6 +1,6 @@
 # pylint: disable=import-error
 import display
-from machine import I2C
+from machine import I2C, Pin
 from mpu6886 import MPU6886
 # pylint: enable=import-error
 
@@ -17,3 +17,14 @@ tft.text(tft.CENTER, tft.CENTER, 'Hello World', tft.GREEN)
 mpu = MPU6886(i2c)
 # mpu.gyro
 # mpu.acc
+
+#Define Callback:
+def on_wasPressed(p):
+    print("Button was pressed: ", p)
+
+def callb_m5(p):
+    tft.clear()
+    tft.text(tft.CENTER, tft.CENTER, mpu.get_dir() , tft.GREEN)
+
+btn_M5 = Pin(37, Pin.IN, handler=callb_m5, trigger=Pin.IRQ_FALLING, debounce= 500)
+btnB = Pin(39, Pin.IN, handler=on_wasPressed, trigger=Pin.IRQ_FALLING, debounce= 500)

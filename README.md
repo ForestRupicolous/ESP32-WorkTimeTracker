@@ -122,6 +122,33 @@ tft.deinit()
 tft.clear()
 tft.text(tft.CENTER, tft.CENTER, mpu.get_dir() , tft.GREEN)
 
+# Buttons
+# Whatch out for different hardware config
+from m5stack import *
+
+from machine import *
+Button_M5 = Pin(37)
+Button_M5.value()
+
+btn_M5 = Pin(37, Pin.IN, handler=callb_m5, trigger=Pin.IRQ_FALLING, debounce= 500)
+btnB = Pin(39, Pin.IN, handler=on_wasPressed, trigger=Pin.IRQ_FALLING, debounce= 500)
+
+buttonC.isPressed() #works, big middle button
+buttonB.isPressed() #always true!?
+
+#Define Callback:
+def on_wasPressed(p):
+print("Button was pressed: ", p)
+
+
+def callb_m5(p):
+tft.clear()
+tft.text(tft.CENTER, tft.CENTER, mpu.get_dir() , tft.GREEN)
+
+buttonC.wasPressed(on_wasPressed)
+##works but can be killed with long press!?
+
+
 # IMU
 acc = mpu.acc
 import math
@@ -138,6 +165,8 @@ if -1.1 < mpu.acc[0] < -0.9:
     print('x')
 elif 0.9 < mpu.acc[0] < 1.1:
     print('-x')
+
+# TODO: Port buttonC init and callback to M5StickC
 
 
 # Upload 
