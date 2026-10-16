@@ -3,3 +3,4 @@
 build/
 *.bin
 __pycache__/
+firmware/test/host/test_core
