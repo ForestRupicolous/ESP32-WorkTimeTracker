@@ -19,23 +19,25 @@ Entwicklung (Hardware-Fakten mit Quellen, Befehle, Konventionen, nächste Schrit
 | Zehnkant-Prisma (Körper + Deckel) | `prisma_gehaeuse.py` (erzeugt `zeitprisma10_koerper.stl`, `zeitprisma10_deckel.stl`) | `prisma10` |
 
 ```
-gehaeuse/   muenze_gehaeuse.py, prisma_gehaeuse.py (parametrisch), fertige STL, Vorschau
+gehaeuse/   muenze_gehaeuse.py, prisma_gehaeuse.py (parametrisch), fertige STL, Vorschau (vorschau_muenze.py rendert sie)
 firmware/   PlatformIO-Projekt (Arduino, M5Unified, M5PM1), Envs muenze8 | muenze12 | prisma10
 tools/      auswertung.py (CSV -> Stunden je Projekt und Tag/Woche), seriallog.py (serielle Ausgabe mitschreiben)
-Makefile    make test | build | flash | log | ref | gehaeuse
+Makefile    make test | build | flash | log | ref | gehaeuse | vorschau
 ```
 
 ## Gehäuse (8-Eck-Münze)
 - **Druck:** ein Teil, Rückseite aufs Bett, ohne Stützen. Einzige Brücke ist das USB-Loch (13,5 mm). Ca. 15 g PLA (gerechnet, 35 % Füllgrad angenommen; je nach Slicer-Einstellung vermutlich mehr).
 - **Einbau:**
   1. M8-Unterlegscheibe DIN 125 (16 × 1,6 mm, Stahl) in die Mulde im Taschenboden legen, eventuell mit einem Tropfen Kleber. Sie hält den Stick über seinen Magnetrücken.
-  2. Stick mit dem USB-Ende zur Seite „6“ einlegen.
-  3. Herausnehmen: durch das Ø10-Loch in der Rückseite drücken.
-- **Laden:** USB-C-Loch in Seite 6, 13,5 × 7 mm. Es passen Stecker bis ca. 12,4 × 6,7 mm.
+  2. Stick mit dem USB-Ende zur Seite „3“ einlegen (die Seite mit dem USB-Loch).
+  3. Herausnehmen: Die Rückseite ist geschlossen (das Ø10-Ausdrückloch ist seit dem 29.10.2026 entfernt). Der Stick sitzt nur magnetisch auf der Scheibe und muss von vorne herausgehoben werden, z. B. mit einem Plektrum oder Fingernagel am Rand der Tasche (rundum 0,3 mm Spiel, die Vorderseite des Sticks liegt 1,5 mm unter der Münzfläche). **Ob das praktikabel ist, ist ungeprüft**; `muenze_gehaeuse.py --ausdrueckloch` bringt das Loch zurück.
+- **Laden:** USB-C-Loch in Seite 3, 13,5 × 7 mm. Es passen Stecker bis ca. 12,4 × 6,7 mm.
 - **Seitentaster** (Reset/Einschalten, Download-Modus, siehe Abschnitt Flashen) sind bei eingebautem Stick **nicht erreichbar**; die Münze hat dafür keine Löcher. Das Zehnkant-Prisma hat Ø5,5-Zugangslöcher.
 - **Stabilität (gerechnet, nicht gemessen):** Aufgestellt kippt die Münze ab ca. 21° zur Nachbarseite und ab ca. 20° flach um. Zum Vergleich: die 12-Eck-Münze mit 18,6 mm kippte ab ca. 13°.
-- **Ziffern:** 1–8 auf den Randflächen, 6. mit Punkt. Lesbar von vorne-oben, wenn das Display zu einem zeigt.
-- **Anpassen:** `python3 muenze_gehaeuse.py --seiten N --dicke D --usb auto|ja|nein --check ../ref/StickS3.stl` (Abhängigkeiten: `pip install manifold3d numpy matplotlib`, geprüft mit manifold3d 3.5.4; das Referenzmodell lädt `make ref`).
+- **Ziffern:** 1–8 auf den Randflächen, ohne Punkt, graviert und lesbar von vorne-oben, wenn das Display zu einem zeigt. Stand 29.10.2026: Die „1“ liegt dort, wo vorher die „4“ war (Seite bei −Y im Modell, die Zählung läuft wie bisher weiter, die USB-Seite ist jetzt die „3“ statt der „6“). Gravurtiefe 1,0 mm statt 0,6 mm: mehr lässt die Stirnwand an den Seiten 3 und 7 nicht zu (dort bleiben 2,6 mm Wand, nach der Gravur genau 1,6 mm = `WALL_MIN`); das Skript begrenzt die Tiefe selbst auf die Restwand (`digit_depth()`, bei der 12-Eck-Variante bleibt es bei 0,6 mm, dort bleiben 1,0 mm).
+- **Innentext:** Innen an den beiden langen Taschenwänden ist Text eingraviert (0,6 mm tief, Wand dahinter über 14 mm): „Octochron“ an der +Y-Wand, an der −Y-Wand in zwei Zeilen die Namen der Urheber (`TEXT_RIGHT`). Er ist von innen lesbar und erst ohne Stick zu sehen. Er steht in `muenze_gehaeuse.py` (`TEXT_LEFT`, `TEXT_RIGHT`, Schrifthöhe und Tiefe daneben). Bei 3 bis 5 mm Schrifthöhe wird er im FDM-Druck nur grob lesbar sein (Strichstärke ca. 0,7 bis 1,1 mm).
+- **Anpassen:** `python3 muenze_gehaeuse.py --seiten N --dicke D --usb auto|ja|nein [--ausdrueckloch] --check ../ref/StickS3.stl` (Abhängigkeiten: `pip install manifold3d numpy matplotlib`, geprüft mit manifold3d 3.5.4; das Referenzmodell lädt `make ref`). Das Vorschaubild (`vorschau_muenze8.png`: Rücken unten, Rückseite, aufgestellt mit „1“ oben, USB-Seite oben, beide Innenwände) entsteht mit `make vorschau` aus dem Modell, mit einem kleinen eigenen Z-Buffer-Renderer ohne Zusatzprogramme.
+- **Geprüft (29.10.2026, am PC):** `--check` besteht für die Münze 8 (13 Punkte, darunter „Rückseite geschlossen“, „Ziffern: Restwand“ und beide Innentexte) und die Münze 12 (11). Die STL ist wasserdicht (jede Kante in genau zwei Dreiecken), 33,0 cm³, 53,8 × 53,8 × 22,0 mm, Kippgrenze 20,8° zur Nachbarseite und 20,2° flach (vorher 21,0° und 20,1°). Ansicht jeder der 8 Randseiten von vorn: Nummer 1 bis 8 in der Reihenfolge −Y, −X−Y, −X (USB), −X+Y, +Y, +X+Y, +X, +X−Y. **Nicht gedruckt.**
 - **Entfernt:** Das frühere Sechskant-Prisma (5 Projekte, `zeitprisma_gehaeuse.stl`, `vorschau.png`) ist gelöscht, weil kein Skript und keine Firmware-Variante es noch erzeugt oder nutzt. Es liegt im Git-Verlauf (Commit a231673).
 
 ## Firmware (Kurzfassung, Details im Abschnitt „Funktionsweise“)

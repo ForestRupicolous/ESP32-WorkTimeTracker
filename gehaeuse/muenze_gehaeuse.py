@@ -13,13 +13,17 @@ Randseite das aktive Projekt (1..N, im Uhrzeigersinn wie ein Zifferblatt).
     python3 muenze_gehaeuse.py --check StickS3.stl      # + Passungspruefung gegen M5-Strukturmodell
 
 Aufbau: Tasche von vorne, Stahlscheibe im Boden haelt den Stick ueber seinen
-Magnetruecken, Ausdrueckloch in der Rueckseite zum Herausnehmen. Seitentaster verdeckt.
+Magnetruecken. Die Rueckseite ist geschlossen (--ausdrueckloch bohrt das frueher uebliche Loch zum
+Herausdruecken wieder hinein). Seitentaster verdeckt. In die beiden langen Taschenwaende ist Text
+eingraviert (TEXT_LEFT / TEXT_RIGHT), sichtbar erst ohne Stick.
 USB-C-Loch (--usb auto): nur wenn die Seitenzahl durch 4 teilbar ist (sonst zeigt das
 USB-Ende auf eine Ecke) und die Randflaeche breit genug ist, ohne die Muenze zu vergroessern.
 
 Koordinaten: X = Stick-Laengsachse (USB-Ende bei -X), Y = quer, Z = Muenzachse,
 Rueckseite bei Z=0 (Druckbett), Vorderseite (Display) bei Z=T.
-Randseite k hat die Normale bei 90 - 360/N*k Grad (N = +Y oben; bei 8 Seiten: 2 = +X, 6 = -X/USB).
+Randseite k (Geometrie-Index) hat die Normale bei 90 - 360/N*k Grad (k = N bei +Y; bei 8 Seiten: 2 = +X, 6 = -X/USB).
+Beschriftung: die Randseite bei -Y (Geometrie-Index N/2) traegt die "1", die Zaehlung laeuft wie bisher weiter
+(8 Seiten: 1 bei -Y, 2 bei -X-Y, 3 bei -X = USB-Loch, 4 bei -X+Y, 5 bei +Y, 6 bei +X+Y, 7 bei +X, 8 bei +X-Y).
 Druck: so wie modelliert, Rueckseite aufs Bett, ohne Stuetzen (nur Bruecke ueber dem USB-Loch).
 """
 import argparse, math, struct, sys
@@ -50,7 +54,15 @@ PUSH_HOLE_SY = 40.0                # Lage laengs (Stick-Koordinate, weg vom USB-
 USB_HOLE     = (13.5, 7.0, 2.0)    # Breite, Hoehe, Eckradius
 
 DIGIT_H      = 9.0     # wird bei schmalen Flaechen automatisch kleiner
-DIGIT_DEPTH  = 0.6
+DIGIT_DEPTH  = 1.0     # Gravurtiefe der Ziffern; wird auf die Restwand (WALL_MIN) hinter der Ziffer begrenzt
+DIGIT_DEPTH_MIN = 0.6  # ... aber nicht flacher als frueher, auch wenn die Wand dort duenn ist (z. B. 12-Eck)
+DIGIT_WALL_ABS  = 1.0  # harte Untergrenze der Restwand hinter einer Ziffer (check)
+DIGIT_STRIP  = 4.5     # halbe Streifenbreite um die Seitenmitte, in der die Restwand geprueft wird
+TEXT_LEFT    = ['Octochron']                        # Text an der +Y-Taschenwand (liest von innen von links nach rechts)
+TEXT_RIGHT   = ['Martin Korinek &', 'Claude']       # Text an der -Y-Taschenwand
+TEXT_H       = 5.0     # Kapitalhoehe der Schrift (wird so klein, dass die breiteste Zeile in die Wand passt)
+TEXT_PITCH   = 1.5     # Zeilenabstand in Kapitalhoehen
+TEXT_DEPTH   = 0.6     # Gravurtiefe in der Taschenwand (dort ist die Wand >= 14 mm stark)
 DIGIT_FONT   = dict(family='DejaVu Sans', weight='bold')
 SEG = 64
 
@@ -127,6 +139,57 @@ def face_normal(k):
     return np.array([math.cos(a), math.sin(a), 0.0])
 
 
+def face_label(k):
+    """Aufgedruckte Nummer der Randseite mit Geometrie-Index k: die Seite bei -Y (k = N/2) ist "1"."""
+    return (k - N_RIM // 2) % N_RIM + 1
+
+
+def text_block_cs(lines, cap_h, max_w, pitch=1.5):
+    """Mehrzeiliger Text als 2D-Flaeche (u nach rechts, v nach oben), um die Mitte zentriert. Gemeinsamer Massstab
+    fuer alle Zeilen: Kapitalhoehe cap_h, aber so klein, dass die breiteste Zeile in max_w passt."""
+    from matplotlib.textpath import TextPath
+    from matplotlib.font_manager import FontProperties
+    fp = FontProperties(**DIGIT_FONT)
+    cap = TextPath((0, 0), 'H', size=10, prop=fp).get_extents().height
+    rows = []
+    for t in lines:
+        tp = TextPath((0, 0), t, size=10, prop=fp)
+        rows.append(CrossSection([np.asarray(q) for q in tp.to_polygons() if len(q) >= 3], FillRule.EvenOdd))
+    s = min(cap_h / cap, max_w / max(c.bounds()[2] - c.bounds()[0] for c in rows))
+    step = pitch * cap * s
+    out = []
+    for i, c in enumerate(rows):
+        b = c.bounds()
+        base = ((len(rows) - 1) / 2 - i) * step - cap * s / 2        # Grundlinie der Zeile i (von oben)
+        out.append(c.scale((s, s)).translate((-(b[0] + b[2]) / 2 * s, base)))
+    cs = out[0]
+    for c in out[1:]:
+        cs = cs + c
+    return cs
+
+
+def digit_wall(r, n, half_w=None):
+    """Wanddicke zwischen einer Randseite (Normale n) und der Tasche, im Streifen +-half_w um die Seitenmitte."""
+    half_w = DIGIT_STRIP if half_w is None else half_w
+    t = np.array([-n[1], n[0]])
+    best = -1e9
+    for poly in pocket_cs().to_polygons():
+        P = np.asarray(poly)
+        for a, b in zip(P, np.roll(P, -1, axis=0)):
+            seg = a + (b - a) * np.linspace(0, 1, 60)[:, None]
+            m = np.abs(seg @ t) <= half_w
+            if m.any():
+                best = max(best, float((seg[m] @ n[:2]).max()))
+    return r - best
+
+
+def digit_depth(r):
+    """Gravurtiefe der Ziffern: DIGIT_DEPTH, hoechstens so tief, dass hinter jeder Ziffer WALL_MIN stehen bleibt,
+    mindestens DIGIT_DEPTH_MIN (bei sehr duenner Wand zaehlt dann DIGIT_WALL_ABS im check)."""
+    thin = min(digit_wall(r, face_normal(k)) for k in range(1, N_RIM + 1))
+    return min(DIGIT_DEPTH, max(DIGIT_DEPTH_MIN, thin - WALL_MIN)), thin
+
+
 def stick_to_model(sx, sy, sz):
     """Stick-Koordinaten -> Modell (USB-Ende bei -X, Display nach +Z)."""
     return (np.asarray(sy) - STICK_L / 2, STICK_W / 2 - np.asarray(sx), Z_FRONT + np.asarray(sz))
@@ -172,7 +235,7 @@ def resolve_usb(mode):
 
 
 # ------------------------------------------------------------- Modell
-def build(r, usb):
+def build(r, usb, push_hole=False):
     outer = ngon_cs(r, EDGE_CHAMFER)
     inner = outer.offset(-EDGE_CHAMFER, JoinType.Miter)
     body = Manifold.batch_hull([slab(outer, EDGE_CHAMFER, T - EDGE_CHAMFER), slab(inner, 0, T)])
@@ -181,8 +244,9 @@ def build(r, usb):
                                  slab(pocket_cs().offset(ENTRY_CHAMF + 1, JoinType.Round), T + 1, T + 1.01)])]
     mx, my, _ = stick_to_model(STICK_W / 2, MAGNET_SY, 0)
     cuts.append(slab(circle(WASHER_D + 0.4, float(mx), float(my)), FLOOR - WASHER_T - 0.2, FLOOR + 0.5))
-    px, py, _ = stick_to_model(STICK_W / 2, PUSH_HOLE_SY, 0)
-    cuts.append(slab(circle(PUSH_HOLE_D, float(px), float(py)), -1, FLOOR + 0.5))
+    if push_hole:
+        px, py, _ = stick_to_model(STICK_W / 2, PUSH_HOLE_SY, 0)
+        cuts.append(slab(circle(PUSH_HOLE_D, float(px), float(py)), -1, FLOOR + 0.5))
     if usb:
         uy, uz = usb_geom()
         w, h, rr = USB_HOLE
@@ -197,11 +261,20 @@ def build(r, usb):
         _, uz = usb_geom()
         zc = (EDGE_CHAMFER + uz - USB_HOLE[1] / 2) / 2              # alle Ziffern unterhalb des Lochs
     flat = 2 * r * TAN - 2 * EDGE_CHAMFER
+    depth, _ = digit_depth(r)
     for k in range(1, N_RIM + 1):
         n = face_normal(k)
-        label = f"{k}." if k in (6, 9) else str(k)
-        g = Manifold.extrude(glyph_cs(label, DIGIT_H, flat - 3.0), DIGIT_DEPTH + 1).translate((0, 0, -DIGIT_DEPTH))
+        g = Manifold.extrude(glyph_cs(str(face_label(k)), DIGIT_H, flat - 3.0), depth + 1).translate((0, 0, -depth))
         cuts.append(g.transform(frame_from(n, n * r + np.array([0, 0, zc]), (0, 0, -1))))
+    # Text innen an den beiden langen Taschenwaenden (Wand dahinter >= 14 mm), von der offenen Seite aus lesbar:
+    # lokal w zeigt in die Tasche, v nach +Z, u = v x w (bei +Y-Wand also +X, bei -Y-Wand -X)
+    ztext = (FLOOR + T - ENTRY_CHAMF) / 2
+    wall_w = 2 * (POCKET_HX - POCKET_R) - 2.0
+    for lines, sy in ((TEXT_LEFT, +1), (TEXT_RIGHT, -1)):
+        if not lines:
+            continue
+        tg = Manifold.extrude(text_block_cs(lines, TEXT_H, wall_w, TEXT_PITCH), TEXT_DEPTH + 1).translate((0, 0, -TEXT_DEPTH))
+        cuts.append(tg.transform(frame_from((0, -sy, 0), (0, sy * POCKET_HY, ztext), (0, 0, 1))))
     return body - Manifold.batch_boolean(cuts, OpType.Add), zc
 
 
@@ -251,7 +324,7 @@ def stability(m, r, stick_mass=20.0, fill=0.35, washer_mass=2.5):
     return m_shell, c, rows
 
 
-def check(m, r, usb, stick_path):
+def check(m, r, usb, stick_path, push_hole=False):
     ok = True
 
     def rep(name, cond, detail):
@@ -280,9 +353,26 @@ def check(m, r, usb, stick_path):
             wall = d - 0.05; break
     rep(f'Wand >= {WALL_MIN} mm um Tasche', wall >= WALL_MIN - 1e-6, f'min. {wall:.2f} mm (Ecken), Stirnwand {r - POCKET_HX:.1f} mm')
     mx, my, _ = stick_to_model(STICK_W / 2, MAGNET_SY, 0)
-    px, py, _ = stick_to_model(STICK_W / 2, PUSH_HOLE_SY, 0)
-    gap = math.hypot(float(px - mx), float(py - my)) - (WASHER_D + 0.4) / 2 - PUSH_HOLE_D / 2
-    rep('Ausdrueckloch neben Scheibe', gap >= 1.5, f'{gap:.1f} mm Steg')
+    if push_hole:
+        px, py, _ = stick_to_model(STICK_W / 2, PUSH_HOLE_SY, 0)
+        gap = math.hypot(float(px - mx), float(py - my)) - (WASHER_D + 0.4) / 2 - PUSH_HOLE_D / 2
+        rep('Ausdrueckloch neben Scheibe', gap >= 1.5, f'{gap:.1f} mm Steg')
+    else:
+        # Rueckseite geschlossen: an der Stelle des fruheren Lochs steht Material bis zur Scheibenmulde
+        px, py, _ = stick_to_model(STICK_W / 2, PUSH_HOLE_SY, 0)
+        probe = Manifold.cube((2.0, 2.0, FLOOR - 0.4)).translate((float(px) - 1.0, float(py) - 1.0, 0.1))
+        rep('Rueckseite geschlossen', (probe ^ m).volume() > probe.volume() - 1e-6, 'Material an der Stelle des fruheren Lochs')
+    depth, thin = digit_depth(r)
+    rep('Ziffern: Restwand', thin - depth >= DIGIT_WALL_ABS - 1e-6,
+        f'Gravurtiefe {depth:.2f} mm, duennste Wand hinter einer Ziffer {thin:.2f} mm, bleibt {thin - depth:.2f} mm'
+        f'{"" if thin - depth >= WALL_MIN - 1e-6 else f" (unter {WALL_MIN} mm, mindestens {DIGIT_WALL_ABS} mm)"}')
+    wall_w = 2 * (POCKET_HX - POCKET_R) - 2.0
+    for name, lines in (('Innentext links', TEXT_LEFT), ('Innentext rechts', TEXT_RIGHT)):
+        if lines:
+            b = text_block_cs(lines, TEXT_H, wall_w, TEXT_PITCH).bounds()
+            zt = (FLOOR + T - ENTRY_CHAMF) / 2
+            rep(name, (b[2] - b[0]) <= wall_w + 1e-6 and zt + b[3] < T - ENTRY_CHAMF and zt + b[1] > FLOOR + 0.5,
+                f'{b[2] - b[0]:.1f} x {b[3] - b[1]:.1f} mm in der geraden Wand ({wall_w:.1f} mm breit, Z {zt + b[1]:.1f}..{zt + b[3]:.1f})')
     rep('Boden unter Scheibe', FLOOR - WASHER_T - 0.2 >= 1.0, f'{FLOOR - WASHER_T - 0.2:.1f} mm')
     if usb:
         uy, uz = usb_geom()
@@ -298,15 +388,20 @@ def main():
     ap.add_argument('--seiten', type=int, default=N_RIM, help='Anzahl Randseiten (Standard 8)')
     ap.add_argument('--dicke', type=float, default=THICKNESS, help='Dicke in mm (Standard 22)')
     ap.add_argument('--usb', choices=('auto', 'ja', 'nein'), default='auto', help='USB-C-Ladeloch')
+    ap.add_argument('--ausdrueckloch', action='store_true', help='Loch in der Rueckseite zum Herausdruecken (frueher Standard)')
     ap.add_argument('--check', metavar='STICK_STL')
     ap.add_argument('-o', default=None)
     a = ap.parse_args()
     configure(a.seiten, a.dicke)
     r, usb = resolve_usb(a.usb)
-    m, zc = build(r, usb)
-    print(f"{N_RIM}-Eck-Muenze{f' mit USB-Loch (Seite {usb_face()})' if usb else ' ohne USB-Loch'}: "
+    m, zc = build(r, usb, a.ausdrueckloch)
+    depth, thin = digit_depth(r)
+    print(f"{N_RIM}-Eck-Muenze{f' mit USB-Loch (Seite {face_label(usb_face())})' if usb else ' ohne USB-Loch'}, "
+          f"{'mit' if a.ausdrueckloch else 'ohne'} Ausdrueckloch: "
           f"Schluesselweite {2*r:.1f} mm, Eckmass {2*r/math.cos(math.pi/N_RIM):.1f} mm, Dicke {T:.1f} mm, "
           f"Randflaeche {2*r*TAN:.1f} mm, Boden {FLOOR:.1f} mm")
+    print(f"Ziffern: Beschriftung 1 bei -Y, Gravurtiefe {depth:.2f} mm (duennste Wand dahinter {thin:.2f} mm), "
+          f"Innentext {TEXT_LEFT} / {TEXT_RIGHT}, {TEXT_DEPTH} mm tief")
     print(f"Volumen {m.volume()/1000:.1f} cm3, Status {m.status()}, Genus {m.genus()}")
     ms, c, rows = stability(m, r)
     print(f"Gewicht ca. {ms:.0f} g Druck (35 % Fuellgrad) + 20 g Stick; Schwerpunkt "
@@ -316,7 +411,7 @@ def main():
           f"(schlechteste Seite)")
     if a.check:
         print('Passungspruefung:')
-        if not check(m, r, usb, a.check):
+        if not check(m, r, usb, a.check, a.ausdrueckloch):
             sys.exit(1)
     out = a.o or f"zeitprisma_muenze{N_RIM}_{T:g}mm{'_usb' if usb else ''}.stl"
     write_stl(m, out, f'Zeitprisma Muenze {N_RIM}')

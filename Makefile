@@ -3,7 +3,7 @@ ENV   ?= muenze8
 REF   := ref/StickS3.stl
 REF_URL := https://raw.githubusercontent.com/m5stack/M5_Hardware/master/Products/K150_StickS3/Structures/StickS3.stl
 
-.PHONY: test build flash log ref gehaeuse alle-gehaeuse clean
+.PHONY: test build flash log ref gehaeuse alle-gehaeuse vorschau clean
 
 test:                       ## Host-Tests der Kernlogik (alle Bauformen)
 	$(MAKE) -C firmware/test/host
@@ -26,6 +26,9 @@ ref: $(REF)                 ## offizielles StickS3-Strukturmodell laden (fuer --
 
 gehaeuse: $(REF)            ## Standard-Muenze (8 Seiten, 22 mm) erzeugen + pruefen
 	cd gehaeuse && python3 muenze_gehaeuse.py --check ../$(REF)
+
+vorschau: $(REF)            ## Vorschaubild gehaeuse/vorschau_muenze8.png neu rendern (mit Stick in der Tasche)
+	cd gehaeuse && python3 vorschau_muenze.py --stick ../$(REF)
 
 alle-gehaeuse: $(REF)       ## alle Varianten erzeugen + pruefen
 	cd gehaeuse && python3 muenze_gehaeuse.py --check ../$(REF)
