@@ -42,9 +42,10 @@ bool appendEvent(time_t t, bool timeValid, int face, int project, const char* na
                  const Carry* carry) {
   char path[40];
   prisma::dayLogPath(path, sizeof path, t, timeValid);
-  bool fresh = !LittleFS.exists(path);
-  File f = LittleFS.open(path, FILE_APPEND);
+  File f = LittleFS.open(path, FILE_APPEND);  // legt die Datei an, falls es sie noch nicht gibt
   if (!f) return false;
+  // neu = leer (exists() meldete am Geraet fuer eine fehlende Datei einen Fehler im Log)
+  bool fresh = f.size() == 0;
   bool ok = true;
   char line[160];
   if (fresh) {
