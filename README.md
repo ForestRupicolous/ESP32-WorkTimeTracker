@@ -3,15 +3,89 @@
 Projektzeit-Tracker im Stil von TimeFlip mit M5Stack StickS3, Fortsetzung des Projekts „M5StickC S3 Projektzeitschreiber“.
 Entwicklung (Hardware-Fakten mit Quellen, Befehle, Konventionen, nächste Schritte): siehe `CLAUDE.md`.
 
-> **Stand, Einschränkungen zuerst:** Die Firmware (`muenze8`) ist am 29.10.2026 auf einen StickS3 geflasht worden (esptool, Hashes verifiziert) und **startet**: Die Startzeile wurde mitgeschnitten, M5PM1 (Akku 4170 mV gelesen) und BMI270 sind ohne Fehlermeldung initialisiert, das WLAN hat sich offenbar verbunden. Rückmeldung nach dem Test am Gerät (29.10.2026): Der Seitenwechsel soll deutlich schneller erfolgen, und solange der Stick ca. in der Drehachse steht, soll immer ein Projekt erkannt werden, mit Hysterese. Das ist als Ringerkennung umgesetzt (siehe Funktionsweise), am PC getestet und geflasht. Am Gerät im 200-s-Mitschnitt vom 29.10.2026 (Stick ohne Gehäuse von Hand gerollt): 24 Seitenwechsel (Seiten 1, 3, 5, 6, 7, 8 und Pause), **kein einziger „unbekannt“**, die erste Seite stand 1,6 bis 2,4 s nach dem Chip-Start im Log (davon ca. 0,8 s Boot). Danach wurden Boot und Entprellung verkürzt (Ruhefenster 0,12 s, `SETTLE_MS` 250 ms, Warmstart ohne M5-IMU-Init, siehe „Start“) und in einem zweiten 200-s-Mitschnitt gemessen: 26 Seitenwechsel (alle 8 Randseiten und Pause), kein „unbekannt“, kein Wechsel im selben Wachabschnitt unter 1,4 s Abstand, Startzeile 0,57 s nach dem Chip-Start (vorher 0,80 s), erste Seite 1,0 bis 1,3 s nach dem Chip-Start. Wie sich das anfühlt, bewertet der Nutzer. Die Wecken-Schleife (der Stick wachte nach dem Einschlafen sofort wieder auf) ist behoben, Ursache und Fix siehe „Diagnose der Weckkette“. Die Standard-Version ohne Diagnose ist geflasht: Im selben Mitschnitt weckte Bewegung den Stick 4 Mal, und er schlief unberührt 84 s lang ohne ein einziges Aufwachen; im zweiten Mitschnitt weckte sie ihn 8 Mal, unberührt schlief er 35 s und 55 s am Stück. Tasten, Töne, Teach-in mit Gehäuse und Stromverbrauch sind nicht getestet. Gehäuse nicht gedruckt.
-> **Vom Nutzer am Gerät bestätigt (29.10.2026, ohne Log, nach dem Flashen mit Neu-Einlernen):** Die Töne sind gut (8 verschiedene weiche Einzeltöne), beim Wecken aus dem Liegen in ein Projekt kommt jetzt der Ton, die Projektanzeige (5 s, mit der aufsummierten Tageszeit des Projekts statt „Seite k“) passt, Schütteln im Liegen zeigt die Tagesübersicht, und Taste A zeigt sie nach einem kurzen Klick aus dem Deep Sleep. Ebenfalls im Log gesehen: Das Teach-in lief durch (9 Seiten, Abweichung max 6,0°), die erste Tagesdatei wurde angelegt. Taste A 2 s halten startet den WLAN-Export (zweimal vom Nutzer ausgelöst, Stick danach per WLAN erreichbar). Per WLAN-Export abgerufen und geprüft (29.10.2026, 15:55 und 16:43): Startseite, Tagesdatei und Alt-Datei einzeln, Gesamtdatei auch per HTTP/1.1 nach der Korrektur (siehe Log-Datei). **Nicht geprüft:** Übertragszeile (kein Mitternachtsübergang gesehen), Projektnamen aus `config_local.h` (Standardnamen unverändert), Taste A 6 s halten (Teach-in per Taste), Strom, Teach-in mit Gehäuse. Zeiten (Schütteln, Wecken per Taste) wurden nicht gemessen.
-> Am PC geprüft (29.10.2026): Kernlogik in Host-Tests (Münze 8 = 236, Münze 12 = 326, Prisma 10 = 255 Prüfungen), Gehäuse-Passung gegen das M5-Strukturmodell (rechnerisch) und dass alle drei Firmware-Varianten mit der ESP32-S3-Toolchain kompilieren (`make build`). „Kompiliert“ heißt nicht „läuft“.
+## Anleitung: So funktioniert Time Roll
 
-**Standard: 8-Eck-Münze**, 53,8 mm Schlüsselweite (ca. 57,6 mm über die gefasten Ecken) × 22 mm.
-- Der Stick liegt flach in der Mitte, das Display zeigt nach vorne.
-- Steht die Münze auf dem Rand, ist die **oben** liegende Randseite (1–8) das aktive Projekt.
-- Auf dem Rücken liegend (Display oben) = Pause. Display unten oder eine unklare Lage = ebenfalls Pause.
+> **Voraussetzungen und Stand:** Gebraucht werden ein M5Stack StickS3 mit der Firmware `muenze8`, ein 2,4-GHz-WLAN (für Uhrzeit und Export) und ein Rechner zum Flashen. Das Gehäuse ist **noch nicht gedruckt**; am Gerät wurde bisher nur der Stick ohne Gehäuse von Hand ausprobiert. Was am Gerät bestätigt ist und was nicht, steht am Ende dieser Anleitung unter „Was bestätigt ist“.
 
+### Das Prinzip
+Der Stick liegt flach in der Mitte einer 8-eckigen „Münze“ (53,8 mm Schlüsselweite, ca. 57,6 mm über die gefasten Ecken, 22 mm dick), das Display zeigt nach vorne. Wie die Münze liegt, sagt dem Stick, woran gearbeitet wird:
+
+| Lage der Münze | Bedeutung |
+|---|---|
+| Auf dem Rand stehend, Randseite 1–8 **oben** | Projekt 1–8 läuft |
+| Auf dem Rücken liegend (Display oben) | Pause |
+| Display unten oder unklare Lage | ebenfalls Pause |
+
+Die Randseiten sind im Uhrzeigersinn nummeriert (Blick auf das Display, USB-C-Loch links):
+
+```
+              5
+         ___________
+        /           \
+    4  /             \  6
+      |               |
+  3   |    Display    |   7
+ (USB)|               |
+      |               |
+    2  \             /  8
+        \___________/
+              1
+```
+
+Wechselt die oben liegende Seite, schreibt der Stick die Zeit seit dem letzten Wechsel dem bisherigen Projekt gut, hängt eine Zeile an die Log-Datei des Tages an, spielt einen Ton und zeigt das neue Projekt an. Dazwischen schläft er (laut M5 ca. 0,1 mA, am Gerät nicht gemessen). Gehäuse, Einbau und Laden: Abschnitt „Gehäuse“.
+
+### In Betrieb nehmen
+1. **Einstellungen:** `firmware/include/config_local.h.example` nach `config_local.h` kopieren und dort WLAN-Zugangsdaten und Projektnamen eintragen (`PROJECT_NAMES_LOCAL`: „Pause“ plus die Projekte, ASCII). Die Datei steht in `.gitignore` und kommt nie nach GitHub, so landen auch Kundennamen nicht im öffentlichen Repo. Ohne die Namenszeile gelten „Projekt 1“ … aus `config.h`.
+2. **Flashen:** `make flash ENV=muenze8` (Voraussetzungen, Download-Modus und Fehler: Abschnitt „Flashen“).
+3. **Erster Start:** Das Display zeigt „hole Uhrzeit ...“ (WLAN bis 8 s, dann NTP bis 6 s). Danach folgt das Teach-in, solange der Stick noch kein Seitenmodell kennt.
+4. **Teach-in:** Der Stick lernt, wie „oben“ für jede Seite aussieht. Die Münze mit dem Display nach oben flach hinlegen und ruhig liegen lassen, dann nacheinander die Seiten 1 bis 8 nach oben stellen, jede Lage 1 s ruhig. Jede erfasste Seite bestätigt ein Ton, am Ende zeigt das Display „Teach-in OK / gespeichert“ mit einem langen Ton. Läuft es schief („Reihenfolge falsch?“ oder 180 s ohne neue Lage), bleibt das alte Modell (beim ersten Mal also keines), und Taste A 6 s startet das Teach-in neu. Das Modell liegt im NVS und bleibt beim Neu-Flashen derselben Bauform erhalten.
+
+### Im Alltag
+- **Projekt wechseln:** Die Münze rollen oder drehen, bis die gewünschte Seite oben liegt. Dabei muss der Stick ungefähr in der Drehachse stehen (Münze auf dem Rand, höchstens 35° aus der Ebene gekippt). Eine neue Seite gilt, sobald sie rund 0,4 s ruhig liegt. Zwischen zwei Seiten gibt es keine Totzone, an den Seitengrenzen verhindert eine Hysterese von 9° das Springen. Seiten, die beim Rollen nur kurz durchlaufen werden (weniger als ca. 0,4 s ruhig), zählen nicht; ob das bei schnellem Rollen zuverlässig klappt, ist nicht geprüft.
+- **Rückmeldung nach einem Wechsel:** Ein weicher Einzelton und 5 s lang das Display mit Projektfarbe, Name und darunter groß der heute aufsummierten Zeit dieses Projekts (h:mm, `--:--`, solange die Uhrzeit unbekannt ist). Die gerade beginnende Strecke zählt noch nicht mit. Jedes Projekt hat seine eigene Note (C-Dur-Pentatonik aufsteigend: Projekt 1 = 523 Hz bis Projekt 8 = 1319 Hz), die Pause die tiefste (392 Hz). Steht die Münze auf dem Rand, dreht sich der Text aufrecht. Die Drehrichtung ist noch nicht kalibriert, und auf den schrägen Seiten 1, 3, 5, 7 steht der Text um 45° schief.
+- **Tagesübersicht:** Sie erscheint 8 s lang, wenn die Münze auf den Rücken gelegt wird, bei kurzem Druck auf Taste A und beim kräftigen Schütteln der flach liegenden Münze (vier Ausschläge innerhalb 1 s, nur im Liegen). Sie zeigt Datum und Uhrzeit, die Akkuspannung und alle Projekte mit der Summe von heute (h:mm); das laufende Projekt zählt live mit.
+- **Neuer Tag:** Die Summen auf dem Display beginnen jeden Tag um Mitternacht bei 0, die Log-Dateien bleiben.
+- **Schlafen:** Sobald nichts mehr angezeigt wird, Taste A nicht gedrückt ist und die Seite übernommen ist, schläft der Stick ein. Die Uhr läuft dabei über die RTC weiter (Genauigkeit nicht gemessen); bei einem Wechsel gleicht der Stick sie per NTP nach, wenn der letzte Abgleich mehr als 6 h her ist. Bei Dauerbewegung (z. B. in der Tasche) schläft er spätestens nach 45 s ein, nach drei solchen Sitzungen in Folge 5 min am Stück.
+
+### Taste A (vorne)
+| Bedienung | Wirkung |
+|---|---|
+| kurz drücken | Tagesübersicht (weckt den Stick auch aus dem Deep Sleep; die Übersicht erscheint nach dem Start, also frühestens ca. 0,6 s nach dem Druck, nicht gemessen) |
+| 2 s halten, dann loslassen | WLAN-Export (das Display zeigt ab 2 s „Loslassen: WLAN-Export“) |
+| 6 s halten, dann loslassen | Teach-in neu starten (das Display zeigt ab 6 s „Loslassen: Teach-in“) |
+
+### Daten abrufen und auswerten
+- **Auf dem Stick** liegt je Tag eine CSV-Datei (`/log_JJJJ-MM-TT.csv`) mit einer Zeile je Wechsel: `zeit,epoch,seite,projekt,name,vbat_mv,zeit_ok`. Wechsel ohne gültige Uhrzeit stehen in `/log_ohne_zeit.csv`.
+- **Abrufen:** Taste A 2 s halten und loslassen. Der Stick verbindet sich mit dem WLAN und zeigt `http://zeitprisma.local` und seine IP, dazu ein langer Ton. Vom Rechner im selben WLAN:
+  - `curl -o zeitprisma.csv http://zeitprisma.local/log.csv` lädt alle Tage in eine Datei,
+  - `curl 'http://zeitprisma.local/tag?d=2026-10-29'` lädt einen einzelnen Tag,
+  - die Startseite `http://zeitprisma.local/` zeigt im Browser die Tagessummen und die Liste der Dateien.
+
+  Löst `zeitprisma.local` nicht auf, die IP vom Display nehmen. Beenden: Taste A klicken oder 5 min warten.
+- **Auswerten:** `python3 tools/auswertung.py zeitprisma.csv [--woche] [--csv out.csv]` rechnet Stunden je Projekt und Tag bzw. Woche.
+
+### Was im Hintergrund passiert
+1. Im Deep Sleep überwacht der Beschleunigungssensor BMI270 die Bewegung selbst (any-motion, Schwelle ca. 80 mg über 100 ms).
+2. Bewegung löst einen Interrupt aus. Der Power-Chip M5PM1 zieht die Weckleitung G13 auf Low und weckt den ESP32-S3. Taste A weckt ihn direkt über G11.
+3. Der Stick startet (Warmstart, rund 0,6 s bis zur Startzeile im Log, ROM und Bootloader nicht mitgerechnet) und liest die Lage 50-mal je Sekunde.
+4. Liegt der Stick 0,12 s ruhig und eine neue Seite danach 0,25 s ununterbrochen, wird der Wechsel übernommen: Zeit gutschreiben, Zeile loggen, Ton, Anzeige.
+5. Ist nichts mehr zu tun, schläft er wieder ein. Seite, Beginn der Strecke und Tagessummen bleiben im RTC-RAM und überstehen den Schlaf, nicht aber Stromverlust und Flashen. Das Seitenmodell aus dem Teach-in (NVS) und die Logs (LittleFS) liegen im Flash.
+
+Alle Zeiten, Schwellen und Töne stehen in `firmware/include/config.h`, die Abläufe im Einzelnen unter „Funktionsweise im Detail“.
+
+### Was bestätigt ist
+Stand 29.10.2026, Einzelheiten im Abschnitt „Stand der Prüfung“.
+
+| Bereich | Stand |
+|---|---|
+| Gehäuse | nur am PC gegen das M5-Strukturmodell geprüft, **nicht gedruckt** |
+| Teach-in mit Gehäuse, Taste A 6 s, Projektnamen aus `config_local.h`, Übertragszeile um Mitternacht, Anzeige-Drehung, Stromverbrauch und Laufzeit | **nicht geprüft** |
+| Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz | vom Nutzer am Gerät bestätigt (ohne Log) |
+| Teach-in (ohne Gehäuse) | lief am Gerät durch (9 Seiten, Abweichung max 6,0°) |
+| WLAN-Export (Taste A 2 s), Tagesdateien, Gesamtdatei | am Gerät abgerufen und geprüft |
+| Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand (ohne Gehäuse) | am Gerät im Log gemessen |
+
+## Varianten und Verzeichnisse
 | Variante | Gehäuse | Firmware-Env |
 |---|---|---|
 | **8-Eck-Münze, 22 mm, mit USB-C-Loch** | `zeitprisma_muenze8_22mm_usb.stl` | `muenze8` (Standard) |
@@ -40,21 +114,6 @@ Makefile    make test | build | flash | log | ref | gehaeuse | vorschau
 - **Geprüft (29.10.2026, am PC):** `--check` besteht für die Münze 8 (13 Punkte, darunter „Rückseite geschlossen“, „Ziffern: Restwand“ und beide Innentexte) und die Münze 12 (11). Die STL ist wasserdicht (jede Kante in genau zwei Dreiecken), 33,0 cm³, 53,8 × 53,8 × 22,0 mm, Kippgrenze 20,8° zur Nachbarseite und 20,2° flach (vorher 21,0° und 20,1°). Ansicht jeder der 8 Randseiten von vorn: Nummer 1 bis 8 in der Reihenfolge −Y, −X−Y, −X (USB), −X+Y, +Y, +X+Y, +X, +X−Y. **Nicht gedruckt.**
 - **Entfernt:** Das frühere Sechskant-Prisma (5 Projekte, `zeitprisma_gehaeuse.stl`, `vorschau.png`) ist gelöscht, weil kein Skript und keine Firmware-Variante es noch erzeugt oder nutzt. Es liegt im Git-Verlauf (Commit a231673).
 
-## Firmware (Kurzfassung, Details im Abschnitt „Funktionsweise“)
-- **Einrichten:**
-  1. WLAN-Zugangsdaten und Projektnamen (`PROJECT_NAMES_LOCAL`: Pause + Projekte, ASCII) in `firmware/include/config_local.h` eintragen (Vorlage: `config_local.h.example`; die Datei steht in `.gitignore` und kommt nie nach GitHub, so landen auch Kundennamen nicht im öffentlichen Repo). Ohne diese Zeile gelten die allgemeinen Namen „Projekt 1“ … aus `config.h`.
-  2. Flashen: siehe Abschnitt „Flashen“ (`make flash`, bei Problemen Download-Modus).
-  3. Beim ersten Start: Uhrzeit per NTP holen, dann Teach-in. Dazu das Display nach oben legen und danach die Seiten 1…8 der Reihe nach nach oben stellen, jeweils ca. 1 s ruhig.
-- **Seitenwechsel:** Steht der Stick ca. in der Drehachse (Münze auf dem Rand), wird immer die nächste Seite erkannt, auch zwischen zwei Seiten, mit Hysterese an den Seitengrenzen. Die neue Seite wird rund 0,4 s nach dem Stillstand übernommen (0,12 s Ruhefenster plus 0,25 s).
-- **Töne:** Jedes Projekt hat einen eigenen weichen Einzelton, aufsteigend in der C-Dur-Pentatonik (Projekt 1 = 523 Hz bis Projekt 8 = 1319 Hz), die Pause die tiefste Note (392 Hz). Die Tabelle `PROJECT_TONES_HZ` steht in `config.h`.
-- **Anzeige:** Nach einem Wechsel zeigt das Display 5 s lang Projektfarbe und Name (`PROJECT_SHOW_MS`), die Tagesübersicht 8 s (`STATUS_SHOW_MS`). Ist die Münze aufgestellt, dreht sich der Text automatisch aufrecht. Die Richtung muss einmal kalibriert werden (`DISP_ROT_OFFSET/DIR`). Bei 8 Seiten steht der Text auf den schrägen Seiten (1, 3, 5, 7) um 45° schief.
-- **Taste A (vorne):**
-  - kurz: Tagesübersicht (weckt den Stick auch aus dem Deep Sleep, die Übersicht erscheint nach dem Boot, also frühestens ca. 0,6 s nach dem Druck, nicht gemessen)
-  - 2 s halten: WLAN-Export unter `http://zeitprisma.local` mit `log.csv`
-  - 6 s halten: Teach-in
-- **Log:** eine Datei je Tag (`/log_JJJJ-MM-TT.csv`) mit `zeit,epoch,seite,projekt,name,vbat_mv,zeit_ok`, eine Zeile je Wechsel. Die Tagessummen auf dem Display beginnen jeden Tag bei 0, die Logs bleiben.
-- **Auswertung:** `python3 tools/auswertung.py zeitprisma.csv [--woche] [--csv out.csv]`, mit dem Gesamtexport `/log.csv` oder einer einzelnen Tagesdatei (siehe Log-Datei).
-
 ## Flashen
 - **Normalfall:** Stick wach und am USB (Linux: Port `/dev/ttyACM0`, Benutzer in der Gruppe `dialout`), dann `make flash ENV=muenze8` (= `cd firmware && pio run -e muenze8 -t upload`; `pio` muss im PATH sein). esptool setzt den Stick selbst in den Bootloader und startet ihn danach neu.
 - **Wenn kein Port erscheint oder der Stick im Sekundentakt neu startet:** Download-Modus erzwingen. Am 29.10.2026 trat das Neustart-Verhalten auf (im Kernel-Log ständig neue USB-Gerätenummern, Ursache ungeklärt). Laut M5-Doku: USB-Kabel anschließen und die **seitliche Reset-Taste gedrückt halten, bis die interne grüne LED blinkt** (eine Haltedauer nennt die Doku nicht). Danach bleibt `303a:1001` (`lsusb`) dauerhaft stehen, ohne neue Gerätenummern. So hat es hier funktioniert.
@@ -66,13 +125,35 @@ Makefile    make test | build | flash | log | ref | gehaeuse | vorschau
 - **Deep Sleep:** Im Deep Sleep verschwindet der USB-Port (laut `seriallog.py`), zum Flashen den Stick bewegen oder Taste A drücken. Bei eingebautem Stick gibt es keinen Zugang zur Seitentaste.
 - **Schlafenden Stick flashen (am 29.10.2026 so gemacht):** Der Port ist nur 1 bis 3 s nach einer Bewegung da. Eine Schleife prüft alle 50 ms, ob `/dev/ttyACM*` erscheint, und startet dann sofort `esptool.py --chip esp32s3 --port <Port> --before default_reset --after no_reset --connect-attempts 1 flash_id` (mit `timeout 15`). Damit steht der Chip im ROM-Bootloader und bleibt dort stehen. Danach `make flash ENV=muenze8` und der Watchdog-Reset aus dem Punkt „Nach dem Flashen die App starten“. Der Stick muss während der Schleife bewegt werden (Rollen genügt). Ein festes Zeitfenster ohne Absprache scheiterte, weil niemand den Stick bewegte.
 
-## Funktionsweise (aus dem Code, Stand 29.10.2026; Konstanten in `firmware/include/config.h`)
-Alles hier ist aus dem Code gelesen. Am Gerät bestätigt sind der Start, das Wecken per Bewegung und die Seitenerkennung beim Rollen von Hand (siehe Stand oben), nicht Teach-in mit Gehäuse, Tasten, Töne und Stromverbrauch.
+## Stand der Prüfung
+Stand 29.10.2026, Einschränkungen zuerst.
+
+**Nicht am Gerät geprüft:**
+- Teach-in mit dem gedruckten Gehäuse und Taste A 6 s halten (Teach-in per Taste).
+- Projektnamen aus `config_local.h` (am Gerät liefen die Standardnamen).
+- Übertragszeile um Mitternacht (kein Mitternachtsübergang gesehen) und Anlegen einer neuen Tagesdatei mit der `size()`-Prüfung (erst beim ersten Wechsel eines neuen Tages).
+- Stromverbrauch und Laufzeit, Anzeige-Drehung des aufgestellten Textes (Kalibrierung `DISP_ROT_OFFSET/DIR`), schnelles Rollen mit der kurzen Entprellung.
+- Zeiten für Schütteln und Wecken per Taste (nicht gemessen).
+- Gehäuse: nicht gedruckt.
+
+**Am PC geprüft:** Kernlogik in Host-Tests (`make test` am 29.10.2026: Münze 8 = 262, Münze 12 = 352, Prisma 10 = 281 Prüfungen, alle bestanden), Gehäuse-Passung gegen das M5-Strukturmodell (rechnerisch) und dass alle drei Firmware-Varianten mit der ESP32-S3-Toolchain kompilieren (`make build` am 29.10.2026 nach den letzten Änderungen, 0 Warnungen). „Kompiliert“ heißt nicht „läuft“.
+
+**Am Gerät im Log gemessen (29.10.2026, Stick ohne Gehäuse):**
+- **Start:** Die Firmware (`muenze8`) wurde geflasht (esptool, Hashes verifiziert) und **startet**: Startzeile mitgeschnitten, M5PM1 (Akku 4170 mV gelesen) und BMI270 ohne Fehlermeldung initialisiert, WLAN offenbar verbunden.
+- **Seitenerkennung:** Rückmeldung nach dem ersten Test am Gerät: Der Seitenwechsel soll deutlich schneller erfolgen, und solange der Stick ca. in der Drehachse steht, soll immer ein Projekt erkannt werden, mit Hysterese. Das ist als Ringerkennung umgesetzt (siehe Funktionsweise im Detail), am PC getestet und geflasht. Im ersten 200-s-Mitschnitt (Stick ohne Gehäuse von Hand gerollt): 24 Seitenwechsel (Seiten 1, 3, 5, 6, 7, 8 und Pause), **kein einziger „unbekannt“**, die erste Seite stand 1,6 bis 2,4 s nach dem Chip-Start im Log (davon ca. 0,8 s Boot). Danach wurden Boot und Entprellung verkürzt (Ruhefenster 0,12 s, `SETTLE_MS` 250 ms, Warmstart ohne M5-IMU-Init, siehe „Start“) und in einem zweiten 200-s-Mitschnitt gemessen: 26 Seitenwechsel (alle 8 Randseiten und Pause), kein „unbekannt“, kein Wechsel im selben Wachabschnitt unter 1,4 s Abstand, Startzeile 0,57 s nach dem Chip-Start (vorher 0,80 s), erste Seite 1,0 bis 1,3 s nach dem Chip-Start. Wie sich das anfühlt, bewertet der Nutzer.
+- **Wecken per Bewegung:** Die Wecken-Schleife (der Stick wachte nach dem Einschlafen sofort wieder auf) ist behoben, Ursache und Fix siehe „Diagnose der Weckkette“. Mit der Standard-Version ohne Diagnose weckte Bewegung den Stick im ersten Mitschnitt 4 Mal, und er schlief unberührt 84 s lang ohne ein einziges Aufwachen; im zweiten Mitschnitt weckte sie ihn 8 Mal, unberührt schlief er 35 s und 55 s am Stück.
+- **Teach-in** (ohne Gehäuse): lief durch (9 Seiten, Abweichung max 6,0°), die erste Tagesdatei wurde angelegt.
+- **WLAN-Export:** Taste A 2 s halten startet ihn (zweimal vom Nutzer ausgelöst, Stick danach per WLAN erreichbar). Abgerufen und geprüft (29.10.2026, 15:55 und 16:43): Startseite, Tagesdatei und Alt-Datei einzeln, Gesamtdatei auch per HTTP/1.1 nach der Korrektur (siehe Log-Datei).
+
+**Vom Nutzer am Gerät bestätigt** (29.10.2026, ohne Log, nach dem Flashen mit Neu-Einlernen): Die Töne sind gut (8 verschiedene weiche Einzeltöne), beim Wecken aus dem Liegen in ein Projekt kommt jetzt der Ton, die Projektanzeige (5 s, mit der aufsummierten Tageszeit des Projekts statt „Seite k“) passt, Schütteln im Liegen zeigt die Tagesübersicht, und Taste A zeigt sie nach einem kurzen Klick aus dem Deep Sleep.
+
+## Funktionsweise im Detail (aus dem Code, Stand 29.10.2026; Konstanten in `firmware/include/config.h`)
+Alles hier ist aus dem Code gelesen. Was davon am Gerät bestätigt ist, steht im Abschnitt „Stand der Prüfung“ (nicht bestätigt: Teach-in mit Gehäuse, Taste A 6 s, Stromverbrauch).
 
 ### Gespeicherter Zustand
 - **RTC-RAM** (überlebt Deep Sleep, nicht Stromverlust, Flashen oder Bauform-Wechsel): aktive Seite, Beginn des Abschnitts, Tagessummen je Projekt, Zeitpunkt des letzten NTP-Syncs, „Zeit gültig“, Zähler unruhiger Sitzungen. Prüfwert `0x5A500300 | Seitenzahl`. Stimmt er nicht, ist es ein **Kaltstart**. Dazu der Merker `imuFastOk` in `hal.cpp` (Warmstart ohne M5-IMU-Init erlaubt, siehe „Start“).
 - **NVS** (Namespace `prisma`): Teach-in-Seitenmodell, Version `0x300 | Seitenzahl`. Passt die Version nicht, gilt das Modell als ungültig und es folgt ein Teach-in.
-- **LittleFS:** `/log.csv`. Ist das Dateisystem leer oder defekt, wird es formatiert.
+- **LittleFS:** die Logs (`/log_JJJJ-MM-TT.csv` und `/log_ohne_zeit.csv`, dazu die Alt-Datei `/log.csv`, siehe Log-Datei). Ist das Dateisystem leer oder defekt, wird es formatiert.
 
 ### Start
 1. Display quer (Rotation 1), M5PM1 und BMI270 initialisieren. Bei Fehler zeigt das Display „Hardwarefehler / PM1/IMU pruefen“ (beim Kaltstart gleich überschrieben), seriell steht „M5PM1 nicht erreichbar“ bzw. „BMI270 nicht gefunden“.
@@ -95,7 +176,7 @@ Alles hier ist aus dem Code gelesen. Am Gerät bestätigt sind der Start, das We
 - Eine neue Seite wird erst übernommen, wenn sie **`SETTLE_MS` = 0,25 s** ununterbrochen ruhig lag, nach dem 0,12 s Ruhefenster also rund 0,4 s nach dem Stillstand (Abtasttakt 20 ms). Bewegung setzt den Timer zurück. Nach dem Wecken aus dem Deep Sleep kommt der Start dazu (die Startzeile erscheint 0,57 s nach dem Chip-Start, siehe „Start“). Gemessen: Der erste Wechsel stand 1,0 bis 1,3 s nach dem Chip-Start im Log, davon rund 0,4 s Erkennung, wenn der Stick sofort ruhig lag.
 - Kürzere Zeiten erkennen schneller, aber Zwischenseiten beim schnellen Rollen werden eher mitgezählt: Wer eine Seite länger als `STILL_WINDOW` + `SETTLE_MS` ruhig lässt, bekommt sie als Wechsel. Wurden beim Rollen falsche Zwischenseiten gezählt, `SETTLE_MS` erhöhen. Das war im Mitschnitt vom 29.10.2026 nicht zu sehen (die Reihenfolge der Seiten war lückenlos), schnelleres Rollen ist aber nicht geprüft.
 - Frühere Versionen: Zuerst Fangbereich ±18° um jede Seite mit 9° Totzone dazwischen (= Pause), 0,5 s Ruhefenster und 3 s Entprellung, zusammen ca. 3,5 s. Danach (Ringerkennung) 0,2 s Ruhefenster und 0,6 s Entprellung, zusammen ca. 0,8 s, erste Seite 1,6 bis 2,4 s nach dem Chip-Start.
-- **Übernehmen:** Zeit des vorigen Abschnitts dem alten Projekt gutschreiben (nur bei gültiger Zeit, an Mitternacht geteilt, im Gerät bleibt nur der heutige Tag), CSV-Zeile anhängen, seriell „Seite n -> Name“, Töne, Anzeige (Seite 0: Status 8 s; Randseite: Projektfarbe und Name 2,5 s, aufrecht gedreht), NTP-Sync, wenn der letzte älter als 6 h ist.
+- **Übernehmen:** Zeit des vorigen Abschnitts dem alten Projekt gutschreiben (nur bei gültiger Zeit, an Mitternacht geteilt, im Gerät bleibt nur der heutige Tag), CSV-Zeile anhängen, seriell „Seite n -> Name“, Töne, Anzeige (Seite 0: Status 8 s; Randseite: Projektfarbe, Name und Tageszeit des Projekts 5 s, aufrecht gedreht), NTP-Sync, wenn der letzte älter als 6 h ist.
 - Projektnummer: Seite 0 und „unbekannt“ = Projekt 0 (Pause), Seite k = Projekt k.
 
 ### Teach-in
@@ -104,7 +185,7 @@ Alles hier ist aus dem Code gelesen. Am Gerät bestätigt sind der Start, das We
 - **Annahmeregeln** (sonst wird die Lage still ignoriert): mindestens 0,65 × Schrittwinkel (bei 8 Seiten 29°) Abstand zu allen bisherigen. Ab der zweiten Randseite liegt jede etwa einen Schrittwinkel (±40 %, bei 8 Seiten 27° bis 63°) neben der zuletzt erfassten. Randseiten liegen höchstens 30° aus der Randebene, also 60° bis 120° zu Seite 0.
 - **Zeitlimit:** 180 s je Seite. Danach „Teach-in / abgebrochen (Zeit)“, drei tiefe Töne, das alte Modell bleibt.
 - **Abschlussprüfung:** Nachbarseiten im Ring 45° ± 8°, Randseiten 90° ± 8° zu Seite 0. Sonst „Reihenfolge falsch?“ mit „Abweichung max x Grad“, drei tiefe Töne, altes Modell bleibt. Erfolg: „Teach-in OK / gespeichert“, langer Ton, Modell im NVS.
-- Ohne Gehäuse von Hand sind ±8° vermutlich kaum zu treffen. Sinnvoll ist das Teach-in mit dem gedruckten Gehäuse.
+- Von Hand ohne Gehäuse lief das Teach-in am 29.10.2026 mit 6,0° Abweichung durch (Grenze 8°, ein einziger Versuch). Mit dem gedruckten Gehäuse sollten die Lagen genauer stimmen (ungeprüft).
 - **Seriell** (neu): `Teach-in: Seite k erfasst` je Seite, am Ende `Teach-in: alle 9 Seiten erfasst, Abweichung max x.x Grad -> Modell gespeichert|verworfen (Reihenfolge falsch?)`, bei Zeitüberschreitung `Teach-in: abgebrochen (Zeit), n von 9 Seiten erfasst`. Der Wert „Abweichung max“ ist die Prüfgröße der Abschlussprüfung (Grenze 8°).
 - **Neu einlernen erzwingen:** Ohne Rechner Taste A 6 s halten und loslassen. Vom Rechner aus das Modell im NVS löschen, dann startet der nächste Kaltstart ohne Modell das Teach-in von selbst (nach „hole Uhrzeit“, WLAN und NTP brauchen bis ca. 14 s): Stick im Bootloader (siehe Flashen, „Schlafenden Stick flashen“), dann `esptool.py --chip esp32s3 --port <Port> --before default_reset --after watchdog_reset erase_region 0x9000 0x5000` (Partition `nvs` laut `default_8MB.csv`: Offset 0x9000, Größe 0x5000). Das löscht auch die WLAN-Kalibrierdaten (werden beim nächsten WLAN-Start neu angelegt). Vorher sichern: `esptool.py ... --after no_reset read_flash 0x9000 0x5000 nvs_backup.bin` (die Datei kann je nach WLAN-Speicherung Zugangsdaten enthalten: nicht ins Repo legen). Misslingt das neue Teach-in („Reihenfolge falsch?“), bleibt der Stick ohne Modell, bis ein Teach-in gelingt (Taste A 6 s).
 
@@ -159,7 +240,7 @@ Eigene Ausgaben der Firmware:
 - Warnungen und Fehler: `LittleFS leer/defekt -> formatiere`, `WLAN nicht erreichbar`, `Log schreiben fehlgeschlagen`, `M5PM1 nicht erreichbar`, `BMI270 nicht gefunden`, `Bewegungs-Wecken nicht verfuegbar, Timer-Rueckfall 60 s`.
 - Im Teach-in steht nur je erfasster Seite und am Ende eine Zeile (siehe Teach-in), beim Warten nichts. Die WLAN-Zugangsdaten gibt die Firmware nirgends aus.
 - Zeilenformat: `[ms seit Start][Level][Datei:Zeile] Funktion(): Text`. Am Gerät gesehen (29.10.2026, nach Watchdog-Reset): dreimal `i2cInit(): Initialising I2C Master: sda=47 scl=48 freq=100000` (Arduino-Core), dann `setup(): Start: kalt=1 Weckgrund=0 Seite=-1 Modell=0 Akku=4170 mV Bauform=Muenze/9`, nach rund 6 s `WiFiGeneric.cpp ... Reason: 8 - ASSOC_LEAVE` (der Core meldet das eigene Abmelden nach dem NTP-Sync, kein Fehler). Fehlt „WLAN nicht erreichbar“, hat sich das WLAN verbunden. Ob NTP die Uhrzeit geliefert hat, steht nicht im Log (das Display zeigt „Heute …“ oder „Zeit unbekannt“).
-- Nach dem Flashen und nach einem Watchdog-Reset ist `kalt=1` und `Modell=0`, es folgt also das Teach-in.
+- Nach dem Flashen und nach einem Watchdog-Reset ist `kalt=1` (der RTC-Zustand ist weg). Das Seitenmodell im NVS bleibt dabei erhalten (`Modell=1`, am 29.10.2026 nach dem Flashen gesehen). `Modell=0` und damit ein Teach-in gibt es beim allerersten Start, nach dem Löschen des NVS und wenn sich die Bauform ändert (die Modell-Version enthält die Seitenzahl).
 
 ## Fehlersuche
 
@@ -175,16 +256,17 @@ Eigene Ausgaben der Firmware:
 | Seite wird nicht erkannt, springt oder kommt zu spät | Der Stick muss ca. in der Drehachse stehen (bis 35° aus der Ebene gekippt). Die Erkennung dauert rund 0,4 s nach dem Stillstand (`STILL_WINDOW` + `SETTLE_MS`), nach dem Wecken aus dem Deep Sleep kommt der Start (0,57 s bis zur Startzeile, dazu ROM und Bootloader, ungemessen) dazu. Springt es an einer Seitengrenze: `RING_HYST_DEG` erhöhen. Werden beim Rollen Zwischenseiten mitgezählt: `SETTLE_MS` erhöhen (vorher 600). Sonst Teach-in neu. |
 | `IMU-Abgleich: ... NICHT erlaubt` im Log | Der Stick lag beim Start nicht ruhig (|g| außerhalb 0,8 bis 1,2) oder die Achsen stimmen nicht mit M5Unified überein (Abweichung ≥ 0,08 g). Bei Bewegung unkritisch: der nächste Start prüft erneut und bleibt bis dahin beim M5-Init (`imu=M5`). Bleibt es bei ruhigem Stick `NICHT erlaubt`, passt die Achsenabbildung in `readBmiAccel()` nicht, dann den Schnellstart in `main.cpp` abschalten (`ownImu = false`). |
 | `E (n) I2S: i2s_driver_uninstall(2048): I2S port 0 has not installed` beim Einschlafen | Harmlos. `hal.cpp` ruft vor dem Schlafen `M5.Speaker.end()`, auch wenn in diesem Wachabschnitt kein Ton lief und der Lautsprecher nie gestartet wurde. Erscheint nur in Wachabschnitten ohne Wechsel. |
-| Nach dem Flashen kommt sofort wieder das Teach-in | Gewollt: Prüfwert und Modell-Version ändern sich mit der Bauform, das Flashen löscht den RTC-Zustand. |
+| Nach dem Flashen kommt wieder das Teach-in | Erwartet nur, wenn sich die Bauform (Env) geändert hat oder das NVS gelöscht wurde: Die Modell-Version enthält die Seitenzahl. Beim Flashen derselben Bauform bleibt das Modell erhalten (am 29.10.2026 so gesehen, `Modell=1`), gelöscht wird nur der RTC-Zustand (Kaltstart, `kalt=1`). |
 
 ## Strom
 `POWER_DEEPSLEEP 1`: Bewegung weckt den ESP32 über BMI270 any-motion → M5PM1 PYG4 → IRQ PYG1 → G13. Danach wird abgetastet, geloggt und wieder geschlafen. M5 gibt für diesen Board-Zustand (L2) ca. 102 µA an. Rechnerisch reicht das für einige Wochen pro Ladung, real bitte messen: `vbat_mv` wird mitgeloggt. Dauerwackeln (Tasche) → 5 min Timer-Schlaf. Rückfall `POWER_DEEPSLEEP 0`: Light Sleep mit Abfrage, einfacher, aber spürbar mehr Verbrauch.
 
 ## Offene Punkte (ungetestet)
-- **Am Gerät nicht getestet:** Teach-in mit Gehäuse, Taste A 6 s halten (Teach-in per Taste), Tageslogs (Inhalt, Übertragszeile, Export), Projektnamen aus `config_local.h`, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen und Taste A kurz (siehe Stand).
+- **Am Gerät nicht getestet:** Teach-in mit Gehäuse, Taste A 6 s halten (Teach-in per Taste), Übertragszeile um Mitternacht und Anlegen einer neuen Tagesdatei (Inhalt der Tagesdatei und Export sind am Gerät geprüft), Projektnamen aus `config_local.h`, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz und der WLAN-Export (siehe Stand der Prüfung).
 - **Bootzeit, Rest (nicht untersucht):** Nach dem Schnellstart bleiben 0,57 s bis zur Startzeile: `setup@64`, `begin` 434 ms (`M5.begin()` ohne IMU: Display- und Power-Initialisierung, nicht aufgeschlüsselt), `hal` 72 ms. Ob sich die Display-Initialisierung beim Wecken per Bewegung sparen lässt (das Display bleibt dort ohnehin aus), ist offen.
 - **Wecken per Bewegung (am Gerät bestätigt, 29.10.2026):** Die Wecken-Schleife (nach dem Einschlafen sofort wieder geweckt, dreimal, dann 60 s Timer-Rückfall) ist behoben, siehe „Diagnose der Weckkette“. Mit der Standard-Version (`WAKE_DIAG 0`) weckte Bewegung den Stick im 200-s-Mitschnitt 4 Mal, dazwischen schlief er einmal 84 s unberührt ohne Aufwachen. Wahrscheinlich war das auch die Neustart-Schleife, die der Stick vor dem Flashen zeigte (die alte Firmware hatte denselben Schlafcode, nachgestellt wurde sie nicht). Nicht untersucht: wie viele Wecken ein Dauerrollen auslöst und wie sich Bewegung in einer Tasche verhält (45-s-Sitzungsgrenze, dann 5 min Schlaf).
 - **Weckkette, Empfindlichkeit:** Die any-motion-Konfiguration ist am Gerät zurückgelesen und stimmt (Dauer 5, Schwelle 0xAA ca. 80 mg, alle Achsen, nur INT1), und echte Bewegung weckt. Ob die Schwelle für sanftes Drehen der Münze reicht und ob Tischerschütterungen ungewollt wecken, ist nach Gefühl im Alltag abzustimmen (`ANYMOT_THRESHOLD`, `ANYMOT_DURATION`).
 - **Magnet-Halt:** Annahme „Magnetic back“ hält an Stahl. Der Stick sitzt nur magnetisch in der offenen Tasche, falls zu schwach: dünnes doppelseitiges Klebeband.
 - **Display-Rotation:** `DISP_ROT_OFFSET/DIR` in `config.h` einmal am Gerät kalibrieren.
 - **Geometrie:** Gehäusemaße aus dem offiziellen Strukturmodell (`M5_Hardware/Products/K150_StickS3`), Schwerpunkt des Sticks unbekannt (Annahme: Mitte), USB-Loch nur für schlanke Stecker.
+- **Uhr im Deep Sleep:** Die Zeit läuft über die RTC des ESP32 weiter (die Zeitstempel im Log blieben über die Schlafphasen gültig). Ihre Genauigkeit über Stunden ist nicht gemessen; abgeglichen wird per NTP nur bei einem Wechsel, wenn der letzte Abgleich älter als 6 h ist (`RESYNC_SEC`).
