@@ -35,7 +35,7 @@ Makefile    make test | build | flash | log | ref | gehaeuse
 - **Stabilität (gerechnet, nicht gemessen):** Aufgestellt kippt die Münze ab ca. 21° zur Nachbarseite und ab ca. 20° flach um. Zum Vergleich: die 12-Eck-Münze mit 18,6 mm kippte ab ca. 13°.
 - **Ziffern:** 1–8 auf den Randflächen, 6. mit Punkt. Lesbar von vorne-oben, wenn das Display zu einem zeigt.
 - **Anpassen:** `python3 muenze_gehaeuse.py --seiten N --dicke D --usb auto|ja|nein --check ../ref/StickS3.stl` (Abhängigkeiten: `pip install manifold3d numpy matplotlib`, geprüft mit manifold3d 3.5.4; das Referenzmodell lädt `make ref`).
-- **Veraltet:** `zeitprisma_gehaeuse.stl` und `vorschau.png` gehören zum früheren Sechskant-Prisma (5 Projekte). Kein Skript und keine Firmware-Variante erzeugt oder nutzt sie noch. Sie liegen nur als Archiv im Repo.
+- **Entfernt:** Das frühere Sechskant-Prisma (5 Projekte, `zeitprisma_gehaeuse.stl`, `vorschau.png`) ist gelöscht, weil kein Skript und keine Firmware-Variante es noch erzeugt oder nutzt. Es liegt im Git-Verlauf (Commit a231673).
 
 ## Firmware
 - **Einrichten:**

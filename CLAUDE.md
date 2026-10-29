@@ -38,8 +38,8 @@ firmware/                    PlatformIO (Arduino, M5Unified, M5PM1), Envs muenze
   test/host/                 Host-Tests (g++), alle drei Bauformen
 gehaeuse/muenze_gehaeuse.py  N-Eck-Münze (--seiten, --dicke, --usb auto|ja|nein, --check)
 gehaeuse/prisma_gehaeuse.py  Zehnkant-Prisma (Körper + Deckel)
-gehaeuse/*.stl, *.png        aktuell: zeitprisma_muenze8_22mm_usb.stl, vorschau_muenze8.png
-                             VERALTET: zeitprisma_gehaeuse.stl, vorschau.png (Sechskant, 5 Projekte; kein Skript/Env mehr dazu)
+gehaeuse/*.stl, *.png        zeitprisma_muenze8_22mm_usb.stl, vorschau_muenze8.png
+                             (alter Sechskant, 5 Projekte: gelöscht, nur noch im Git-Verlauf, Commit a231673)
 Makefile                     test | build | flash | log | ref | gehaeuse | alle-gehaeuse | clean (löscht auch firmware/.pio!)
 tools/auswertung.py          CSV → Stunden je Projekt/Tag/Woche
 tools/seriallog.py           serielle Ausgabe nicht-interaktiv mitschreiben (verbindet nach Deep Sleep neu)
