@@ -39,7 +39,7 @@ Makefile    make test | build | flash | log | ref | gehaeuse
 
 ## Firmware
 - **Einrichten:**
-  1. In `firmware/include/config.h` WLAN und Projektnamen eintragen.
+  1. WLAN-Zugangsdaten in `firmware/include/config_local.h` eintragen (Vorlage: `config_local.h.example`; die Datei steht in `.gitignore` und kommt nie nach GitHub), Projektnamen in `firmware/include/config.h`.
   2. Flashen mit `make flash` bzw. `pio run -e muenze8 -t upload`. Download-Modus: Seitentaster lang drücken.
   3. Beim ersten Start: Uhrzeit per NTP holen, dann Teach-in. Dazu das Display nach oben legen und danach die Seiten 1…8 der Reihe nach nach oben stellen, jeweils ca. 1 s ruhig.
 - **Seitenwechsel:** Nach 3 s Ruhe wird die neue Seite übernommen, mit einem Fangbereich von ±18°.

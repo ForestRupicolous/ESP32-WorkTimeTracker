@@ -54,8 +54,17 @@ static const uint16_t PROJECT_COLORS[] = {
 #define DISP_ROT_DIR     1
 
 // ---------------------------------------------------------------- WLAN / Zeit
+// Zugangsdaten NIE hier eintragen (diese Datei ist in git, das Repo oeffentlich):
+// sie stehen in config_local.h (steht in .gitignore, Vorlage: config_local.h.example).
+#if __has_include("config_local.h")
+#include "config_local.h"
+#endif
+#ifndef WIFI_SSID
 #define WIFI_SSID        "dein-wlan"
+#endif
+#ifndef WIFI_PASS
 #define WIFI_PASS        "dein-passwort"
+#endif
 #define TZ_INFO          "CET-1CEST,M3.5.0,M10.5.0/3"   // Wien
 #define NTP_1            "at.pool.ntp.org"
 #define NTP_2            "pool.ntp.org"

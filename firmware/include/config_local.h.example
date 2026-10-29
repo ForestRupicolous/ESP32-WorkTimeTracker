@@ -1,0 +1,9 @@
+// WLAN-Zugangsdaten - Vorlage (diese .example-Datei ist in git, die echte Datei nicht).
+//   cp firmware/include/config_local.h.example firmware/include/config_local.h
+// Dann unten SSID und Passwort eintragen. config_local.h steht in .gitignore und
+// kommt nie nach GitHub. Alles, was hier definiert ist, ersetzt die Platzhalter in config.h.
+// Nur ASCII verwenden. Nach dem ersten Anlegen: einmal "touch firmware/include/config.h",
+// damit PlatformIO die neue Datei sicher mitbaut.
+#pragma once
+#define WIFI_SSID        "dein-wlan"
+#define WIFI_PASS        "dein-passwort"

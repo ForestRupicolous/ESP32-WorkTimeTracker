@@ -10,3 +10,4 @@ ref/
 *.log
 log*.txt
 CLAUDE.local.md
+config_local.h

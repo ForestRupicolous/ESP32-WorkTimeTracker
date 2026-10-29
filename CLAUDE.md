@@ -27,7 +27,8 @@ TimeFlip-artiger Zeiterfasser. **Standard: 8-Eck-„Münze“**, 53,8 mm Schlüs
 ## Struktur
 ```
 firmware/                    PlatformIO (Arduino, M5Unified, M5PM1), Envs muenze8 | muenze12 | prisma10
-  include/config.h           Projektnamen, WLAN, Fangbereich, Display-Rotation, Strom
+  include/config.h           Projektnamen, WLAN-Platzhalter, Fangbereich, Display-Rotation, Strom
+  include/config_local.h     echte WLAN-Zugangsdaten (gitignored, Vorlage config_local.h.example)
   lib/prisma_core/           hardwareunabhängig: Seitenerkennung, Ruhe, Entprellen, Teach-in,
                              Tagessummen, CSV  (am PC testbar)
   src/hal.*                  M5PM1, BMI270 any-motion, Deep/Light Sleep, Weckkette
@@ -64,6 +65,7 @@ make ref && make gehaeuse  # Gehäuse erzeugen und gegen das M5-Modell prüfen
 - Texte am Display in ASCII (keine Umlaute, die Fonts haben sie nicht). Code-Kommentare ebenfalls ASCII.
 - Gehäuse: Nach jeder Parameteränderung `--check ref/StickS3.stl` ausführen. Mindestwand 1,6 mm; Taste A braucht ≥ 0,3 mm Luft zur Vorderseite.
 - Gedruckt wird ohne Stützen. Die Münze liegt beim Druck mit der Rückseite auf dem Bett; einzige Brücke ist das USB-Loch (13,5 mm).
+- **WLAN-Zugangsdaten nie in getrackte Dateien** (das Repo ist öffentlich auf GitHub). Sie stehen in `firmware/include/config_local.h` (gitignored); `config.h` bindet sie per `__has_include` ein. Beim Integrieren einer neuen ZIP prüfen, dass `config.h` diesen Block noch hat, und nur gezielte Pfade stagen.
 
 ## Stand
 **Nicht auf Hardware getestet, Gehäuse nicht gedruckt.** Alles Folgende ist nur am PC geprüft.
