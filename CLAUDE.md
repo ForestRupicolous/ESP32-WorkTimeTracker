@@ -85,14 +85,16 @@ Am Gerät (29.10.2026):
 - `make flash ENV=muenze8` schrieb Bootloader, Partitionstabelle, boot_app0 und App (1.135.744 Bytes), alle Hashes verifiziert.
 - Nach dem Flashen blieb der Stick im Bootloader: Der RTS-Hard-Reset von esptool führt hier zu `boot:0x21 (DOWNLOAD(USB/UART0))`. Ein **Watchdog-Reset startet die App** (`esptool.py ... --before default_reset --after watchdog_reset chip_id`).
 - Startzeile gesehen: `Start: kalt=1 Weckgrund=0 Seite=-1 Modell=0 Akku=4170 mV Bauform=Muenze/9`. Keine Fehlermeldung zu M5PM1/BMI270, Akkuspannung aus dem M5PM1 gelesen, WLAN offenbar verbunden (keine Warnung „WLAN nicht erreichbar“). NTP-Ergebnis, Teach-in, Seitenerkennung, Wecken per Bewegung, Tasten, Töne und Strom sind **nicht getestet**.
-- ModemManager hielt den Port offen (der Port wanderte von `ttyACM0` auf `ttyACM1`), PlatformIO meldet veraltete udev-Regeln (`99-platformio-udev.rules`). Das ist der Verdacht für die Neustart-Schleife vor dem Flashen, nicht bewiesen. Befehl zum Erneuern: README, Abschnitt Flashen.
+- ModemManager hielt den Port offen (der Port wanderte von `ttyACM0` auf `ttyACM1`), PlatformIO meldet veraltete udev-Regeln (`99-platformio-udev.rules`). Das erklärt die wandernde Port-Nummer vermutlich, nicht die Neustart-Schleife. Befehl zum Erneuern: README, Abschnitt Flashen.
+- Neue Ringerkennung (geflasht): Der erste Seitenwechsel kam 0,85 s nach Beginn der Abtastung (Log `Seite 5 -> Projekt 5`), das Teach-in-Modell aus dem NVS blieb erhalten (`Modell=1`). Wie es sich beim Rollen anfühlt, ist nicht bestätigt.
+- **Wecken-Schleife:** Bewegung weckt zwar (`Weckgrund=2`), aber nach dem Einschlafen kommt ca. 0,6 s später sofort wieder ein Wecken, dreimal, dann Rückfall „Timer 60 s“ (`hal.cpp:169`), auch bei unberührtem Stick am USB. Die IRQ-Leitung G13 liegt kurz nach dem Armieren wieder auf Low. Wahrscheinlich war das auch die Neustart-Schleife vor dem Flashen (alte Firmware, gleicher Schlafcode). Debug-Ansatz: Pegel G13, BMI270-INT-Status und M5PM1-IRQ-Register vor und nach dem Einschlafen loggen; Rückfall `POWER_DEEPSLEEP 0`.
 - Befehle und Erklärung zu allem Verhalten der Firmware: README (Flashen, Funktionsweise, Fehlersuche). Für Erklärungen zuerst die README lesen, nicht den Code.
 - Die BMI270-any-motion-Register werden direkt geschrieben (`hal.cpp`, nach Bosch SensorAPI `bmi270.c`). Das M5-Beispiel nutzt dafür die SparkFun-Lib.
 
 ## Nächste Schritte (Reihenfolge)
 1. Erledigt (29.10.2026): `make build`, alle drei Envs bauen. Bei neuen M5Unified-/M5PM1-Ständen erneut prüfen (`lib_deps` sind nicht gepinnt).
 2. Erledigt (29.10.2026): geflasht, Startzeile gesehen, M5PM1/BMI270 ohne Fehler. Offen: udev-Regeln erneuern (README, Flashen) und prüfen, ob `make flash` die App danach von selbst startet.
-3. **Weckkette prüfen:** Deep Sleep → Münze bewegen → aufwachen (Weckgrund im Log). Wenn das nicht geht: Fehler suchen; Rückfall ist `POWER_DEEPSLEEP 0`.
+3. **Weckkette prüfen:** Teilweise bestätigt (Bewegung weckt, `Weckgrund=2`), aber Wecken-Schleife nach dem Einschlafen (siehe Stand, „Am Gerät“). Fehler suchen; Rückfall ist `POWER_DEEPSLEEP 0`.
 4. Teach-in durchspielen, Erkennung aller 8 Seiten und der Pause prüfen. Ringerkennung am Gerät abstimmen (Rückmeldung 29.10.2026: Wechsel deutlich schneller, in der Drehachse immer ein Projekt, mit Hysterese): `RING_HYST_DEG`, `RING_UPRIGHT_DEG`, `SETTLE_MS`, `STILL_WINDOW` in `config.h`.
 5. `DISP_ROT_OFFSET/DIR` so kalibrieren, dass der Text aufgestellt aufrecht steht.
 6. Ruhestrom/Laufzeit: `vbat_mv` im Log über einige Tage beobachten.
