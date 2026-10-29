@@ -54,10 +54,22 @@ void serveExport(const std::function<String()>& statusHtml,
 
   WebServer srv(80);
   srv.on("/", HTTP_GET, [&]() { srv.send(200, "text/html; charset=utf-8", statusHtml()); });
+  // Alle Logs hintereinander (eine Kopfzeile): fuer tools/auswertung.py
   srv.on("/log.csv", HTTP_GET, [&]() {
-    File f = LittleFS.open(store::logPath(), FILE_READ);
-    if (!f) { srv.send(404, "text/plain", "noch keine Daten"); return; }
     srv.sendHeader("Content-Disposition", "attachment; filename=zeitprisma.csv");
+    srv.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    srv.send(200, "text/csv", "");
+    store::streamAll([&](const uint8_t* d, size_t n) { srv.sendContent((const char*)d, n); });
+    srv.sendContent("");
+  });
+  // Ein Tag: /tag?d=JJJJ-MM-TT (auch d=ohne_zeit und d=alt)
+  srv.on("/tag", HTTP_GET, [&]() {
+    String key = srv.arg("d");
+    char path[40];
+    if (!store::pathFromKey(key.c_str(), path, sizeof path)) { srv.send(400, "text/plain", "ungueltiger Tag"); return; }
+    File f = LittleFS.open(path, FILE_READ);
+    if (!f) { srv.send(404, "text/plain", "kein Log fuer diesen Tag"); return; }
+    srv.sendHeader("Content-Disposition", "attachment; filename=zeitprisma_" + key + ".csv");
     srv.streamFile(f, "text/csv");
     f.close();
   });

@@ -1,9 +1,16 @@
-// WLAN-Zugangsdaten - Vorlage (diese .example-Datei ist in git, die echte Datei nicht).
+// Eigene Einstellungen - Vorlage (diese .example-Datei ist in git, die echte Datei nicht).
 //   cp firmware/include/config_local.h.example firmware/include/config_local.h
-// Dann unten SSID und Passwort eintragen. config_local.h steht in .gitignore und
-// kommt nie nach GitHub. Alles, was hier definiert ist, ersetzt die Platzhalter in config.h.
+// Dann unten SSID, Passwort und Projektnamen eintragen. config_local.h steht in .gitignore und
+// kommt nie nach GitHub (z. B. Kundennamen). Alles, was hier definiert ist, ersetzt die allgemeinen Werte in config.h.
 // Nur ASCII verwenden. Nach dem ersten Anlegen: einmal "touch firmware/include/config.h",
 // damit PlatformIO die neue Datei sicher mitbaut.
 #pragma once
 #define WIFI_SSID        "dein-wlan"
 #define WIFI_PASS        "dein-passwort"
+
+// Projektnamen (optional). Index = Seite: Eintrag 0 = Pause, danach Projekt 1, 2, ...
+// Mindestens so viele Eintraege, wie die Bauform Seiten hat (Muenze 8: 9, Muenze 12: 13, Prisma 10: 10), mehr sind
+// erlaubt. ASCII, kurz halten: die Tagesuebersicht zeigt nur 7 Zeichen, die Projektanzeige quer etwa 16.
+// Fehlt die Zeile, gelten die allgemeinen Namen aus config.h ("Projekt 1" ...).
+#define PROJECT_NAMES_LOCAL "Pause", "Projekt 1", "Projekt 2", "Projekt 3", "Projekt 4", "Projekt 5", "Projekt 6", \
+                            "Projekt 7", "Projekt 8", "Projekt 9", "Projekt 10", "Projekt 11", "Projekt 12"

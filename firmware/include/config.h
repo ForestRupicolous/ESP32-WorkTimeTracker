@@ -8,7 +8,16 @@
 //   Muenze: auf dem Ruecken liegend (Display oben); Display unten zaehlt ebenfalls als Pause
 //   Prisma: Display oben; aufrecht stehend zaehlt ebenfalls als Pause
 #include "prisma_core.h"
-#if defined(PRISMA_PRISMA10)
+// Eigene Einstellungen (WLAN-Zugangsdaten, Projektnamen) stehen in config_local.h. Die Datei steht in .gitignore
+// (das Repo ist oeffentlich, Kundennamen und Passwoerter gehoeren nicht hinein), Vorlage: config_local.h.example.
+// Was dort definiert ist, ersetzt die allgemeinen Werte hier.
+#if __has_include("config_local.h")
+#include "config_local.h"
+#endif
+#if defined(PROJECT_NAMES_LOCAL)
+// Pause + Projekte aus config_local.h (mindestens kFaces Eintraege, mehr sind erlaubt)
+static const char* const PROJECT_NAMES[] = {PROJECT_NAMES_LOCAL};
+#elif defined(PRISMA_PRISMA10)
 static const char* const PROJECT_NAMES[] = {
     "Pause", "Projekt 1", "Projekt 2", "Projekt 3", "Projekt 4",
     "Projekt 5", "Projekt 6", "Projekt 7", "Projekt 8", "Projekt 9",
@@ -76,10 +85,7 @@ static const uint16_t PROJECT_TONES_HZ[] = {
 
 // ---------------------------------------------------------------- WLAN / Zeit
 // Zugangsdaten NIE hier eintragen (diese Datei ist in git, das Repo oeffentlich):
-// sie stehen in config_local.h (steht in .gitignore, Vorlage: config_local.h.example).
-#if __has_include("config_local.h")
-#include "config_local.h"
-#endif
+// sie stehen in config_local.h (siehe oben, Vorlage: config_local.h.example).
 #ifndef WIFI_SSID
 #define WIFI_SSID        "dein-wlan"
 #endif
@@ -101,6 +107,13 @@ static const uint16_t PROJECT_TONES_HZ[] = {
 #define SETTLE_MS        250     // so lange muss eine neue Seite danach ruhig liegen (Wechsel ca. 0,4 s nach Stillstand)
 #define TEACH_WINDOW     50      // Teach-in: 50 Samples = 1 s ruhig je Seite
 #define SESSION_MAX_MS   45000   // spaetestens dann wieder schlafen (z. B. in der Tasche)
+// Schuetteln (nur liegend, d. h. Seite 0 uebernommen): zeigt die Tagesuebersicht, auch wenn sich die Seite nicht aendert.
+// Eine Spitze ist eine Aenderung zwischen zwei Samples (20 ms) ueber SHAKE_JERK_G; SHAKE_PEAKS Spitzen innerhalb
+// SHAKE_WINDOW_MS gelten als Schuetteln (prisma_core.h, ShakeDetector). Bis zur Erkennung dauert es ca. 0,5 s Schuetteln.
+#define SHAKE_JERK_G     0.25f
+#define SHAKE_PEAKS      4
+#define SHAKE_WINDOW_MS  1000
+#define SHAKE_GRACE_MS   2000    // nach dem Wecken im Liegen so lange wach bleiben, damit ein Schuetteln erkannt wird
 // Ringerkennung (prisma_core.h, classifyRing): Steht der Stick ca. in der Drehachse (die Beschleunigung
 // liegt ca. in der Ringebene), wird immer die naechste Seite erkannt, auch zwischen zwei Seiten.
 // Die Hysterese verhindert Flackern an den Seitengrenzen. Standardwerte kommen aus prisma_core.h.

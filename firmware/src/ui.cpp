@@ -21,8 +21,28 @@ static void on() {
   M5.Display.setBrightness(110);
 }
 
+// Der Lautsprecher (ES8311-Codec plus Verstaerker) braucht nach M5.Speaker.begin() eine Anlaufzeit. Am Geraet ging der
+// erste Ton nach dem Wecken verloren (Rueckmeldung 29.10.2026: kein Ton beim Wecken aus dem Liegen in ein Projekt).
+// Darum frueh starten (prepareSound) und einen Ton kurz nach dem Start mit Stille beginnen lassen.
+static constexpr uint32_t kWarmupMs = 200;
+static uint32_t speakerStartedMs = 0;
+
+static void ensureSpeaker() {
+  if (M5.Speaker.isRunning()) return;
+  M5.Speaker.begin();
+  speakerStartedMs = millis();
+}
+
+static uint32_t warmupLeftMs() {
+  uint32_t since = millis() - speakerStartedMs;
+  return since >= kWarmupMs ? 0 : kWarmupMs - since;
+}
+
+void prepareSound() { ensureSpeaker(); }
+
 void beep(int count, int freq, int ms) {
-  if (!M5.Speaker.isRunning()) M5.Speaker.begin();
+  ensureSpeaker();
+  if (uint32_t w = warmupLeftMs()) delay(w);
   for (int i = 0; i < count; ++i) {
     M5.Speaker.tone(freq, ms);
     while (M5.Speaker.isPlaying()) delay(2);
@@ -37,15 +57,19 @@ void longBeep() { beep(1, 1800, 350); }
 static constexpr uint32_t kToneRate = 22050;  // Abtastrate des StickS3-Lautsprechers (M5Unified-Vorgabe)
 static constexpr uint32_t kToneMs = 300;
 static constexpr size_t kToneLen = kToneRate * kToneMs / 1000;
-static int16_t toneBuf[kToneLen];
+static constexpr size_t kLeadMax = kToneRate * kWarmupMs / 1000;  // Stille vor dem Ton, solange der Lautsprecher anlaeuft
+static int16_t toneBuf[kLeadMax + kToneLen];
 
 void waitTone() {
   while (M5.Speaker.isPlaying()) delay(2);
 }
 
 static void softTone(float hz) {
-  if (!M5.Speaker.isRunning()) M5.Speaker.begin();
+  ensureSpeaker();
   waitTone();
+  size_t lead = (size_t)warmupLeftMs() * kToneRate / 1000;
+  if (lead > kLeadMax) lead = kLeadMax;
+  memset(toneBuf, 0, lead * sizeof(int16_t));
   const float w = 2.0f * (float)M_PI * hz / (float)kToneRate;
   for (size_t i = 0; i < kToneLen; ++i) {
     float t = (float)i / (float)kToneRate;
@@ -54,9 +78,9 @@ static void softTone(float hz) {
     float tail = (float)(kToneLen - 1 - i) / (float)kToneRate;
     if (tail < 0.02f) env *= tail / 0.02f;                            // Ausblenden 20 ms
     float s = sinf(w * (float)i) + 0.25f * sinf(2.0f * w * (float)i) * expf(-t / 0.05f);
-    toneBuf[i] = (int16_t)(s * env * 23000.0f);
+    toneBuf[lead + i] = (int16_t)(s * env * 23000.0f);
   }
-  M5.Speaker.playRaw(toneBuf, kToneLen, kToneRate, false, 1, -1, false);
+  M5.Speaker.playRaw(toneBuf, lead + kToneLen, kToneRate, false, 1, -1, false);
 }
 
 void startProjectTone(int project) {
@@ -71,7 +95,7 @@ void beepProject(int project) {
   waitTone();
 }
 
-void showProject(int project, const char* name, uint8_t rot) {
+void showProject(int project, const char* name, uint8_t rot, int32_t todaySec) {
   setRotation(rot);
   on();
   auto& d = M5.Display;
@@ -79,11 +103,13 @@ void showProject(int project, const char* name, uint8_t rot) {
   d.setTextColor(TFT_BLACK);
   d.setTextDatum(textdatum_t::middle_center);
   d.setFont(&fonts::Font4);
-  d.drawString(name, d.width() / 2, d.height() / 2 - 8);
-  d.setFont(&fonts::Font2);
+  d.drawString(name, d.width() / 2, d.height() * 3 / 10);
+  // aufsummierte Zeit dieses Projekts heute, gross (ohne gueltige Uhrzeit "--:--")
   char s[16];
-  snprintf(s, sizeof s, "Seite %d", project);
-  d.drawString(s, d.width() / 2, d.height() - 18);
+  if (todaySec >= 0) prisma::formatHM(s, sizeof s, (uint32_t)todaySec);
+  else snprintf(s, sizeof s, "--:--");
+  d.setFont(&fonts::Font6);
+  d.drawString(s, d.width() / 2, d.height() * 66 / 100);
 }
 
 void showStatus(const prisma::DayTotals& tot, int currentProject, time_t since, time_t now,

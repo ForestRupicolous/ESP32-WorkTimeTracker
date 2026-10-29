@@ -17,8 +17,12 @@ void startProjectTone(int project);
 void waitTone();
 void beepProject(int project);  // = startProjectTone() + waitTone()
 
-// Bestaetigung nach Seitenwechsel (Projektname in Projektfarbe)
-void showProject(int project, const char* name, uint8_t rot);
+// Lautsprecher vorab starten (braucht eine Anlaufzeit, sonst geht der erste Ton nach dem Wecken verloren)
+void prepareSound();
+
+// Bestaetigung nach Seitenwechsel: Projektname in Projektfarbe, darunter gross die aufsummierte Zeit des Projekts
+// heute (h:mm). todaySec < 0 = Uhrzeit unbekannt, dann "--:--".
+void showProject(int project, const char* name, uint8_t rot, int32_t todaySec);
 // Pause/Status (Rotation DISP_ROT_FLAT): Tagessummen, laufendes Projekt, Akku
 void showStatus(const prisma::DayTotals& d, int currentProject, time_t since, time_t now,
                 bool timeValid, int vbatMv);

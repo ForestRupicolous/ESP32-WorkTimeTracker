@@ -11,6 +11,9 @@
 //   Taste A kurz: Tagesuebersicht | 2 s halten: WLAN-Export | 6 s halten: Teach-in
 #include <M5Unified.h>
 
+#include <utility>
+#include <vector>
+
 #include "config.h"
 #include "hal.h"
 #include "net.h"
@@ -32,7 +35,8 @@ struct Persist {
 };
 RTC_DATA_ATTR static Persist g;
 static constexpr uint32_t kMagic = 0x5A500300u | kFaces;  // Version 3 + Bauform
-static_assert(sizeof(PROJECT_NAMES) / sizeof(PROJECT_NAMES[0]) == kFaces, "PROJECT_NAMES passt nicht zur Bauform");
+static_assert(sizeof(PROJECT_NAMES) / sizeof(PROJECT_NAMES[0]) >= kFaces,
+              "zu wenige PROJECT_NAMES (config_local.h: PROJECT_NAMES_LOCAL braucht Pause + Projekte der Bauform)");
 static_assert(sizeof(PROJECT_COLORS) / sizeof(PROJECT_COLORS[0]) >= kFaces, "zu wenige PROJECT_COLORS");
 static_assert(sizeof(PROJECT_TONES_HZ) / sizeof(PROJECT_TONES_HZ[0]) >= kFaces, "zu wenige PROJECT_TONES_HZ");
 static constexpr time_t kEpochSane = 1704067200;  // 2024-01-01
@@ -40,10 +44,12 @@ static constexpr time_t kEpochSane = 1704067200;  // 2024-01-01
 static FaceModel model;
 static StillDetector still(STILL_WINDOW, STILL_DEV_DEG);
 static Tracker tracker(SETTLE_MS);
+static ShakeDetector shake(SHAKE_JERK_G, SHAKE_PEAKS, SHAKE_WINDOW_MS);
 static const RingParams ringParams{RING_HYST_DEG, RING_UPRIGHT_DEG, RING_UPRIGHT_EXIT_DEG, FLAT_DEG,
                                    FLAT_EXIT_DEG};
 static uint32_t sessionStart = 0;
 static uint32_t uiUntil = 0;  // solange etwas angezeigt wird, nicht schlafen
+static uint32_t awakeUntil = 0;  // Wachbleiben ohne Anzeige (Zeit zum Schuetteln nach dem Wecken im Liegen)
 
 static time_t nowT() { return time(nullptr); }
 
@@ -69,19 +75,25 @@ static void showStatusNow(uint32_t ms = STATUS_SHOW_MS) {
 // ---------------------------------------------------------------- Ereignis
 static void commit(int face, const Vec3& accel) {
   time_t now = nowT();
-  if (g.timeValid && g.since > kEpochSane) accrue(g.today, projectForFace(g.face), g.since, now);
+  // Abschnitt, der mit diesem Wechsel endet (fuer die Uebertragszeile, falls er ueber Mitternacht lief)
+  const bool hadSegment = g.timeValid && g.since > kEpochSane;
+  const store::Carry carry{g.since, g.face, projectForFace(g.face), PROJECT_NAMES[projectForFace(g.face)]};
+  if (hadSegment) accrue(g.today, projectForFace(g.face), g.since, now);
   g.face = (int8_t)face;
   g.since = now;
   int p = projectForFace(face);
-  if (!store::appendEvent(now, g.timeValid, face, p, PROJECT_NAMES[p], hal::batteryMv()))
+  if (!store::appendEvent(now, g.timeValid, face, p, PROJECT_NAMES[p], hal::batteryMv(), hadSegment ? &carry : nullptr))
     log_e("Log schreiben fehlgeschlagen");
   log_i("Seite %d -> %s", face, PROJECT_NAMES[p]);
+  // aufsummierte Zeit des Projekts heute (die Summen beginnen mit jedem Tag bei 0); -1 = Uhrzeit unbekannt
+  int32_t todaySec = -1;
+  if (g.timeValid) todaySec = isSameDay(g.today, now) ? (int32_t)g.today.sec[p] : 0;
 
   ui::startProjectTone(p);  // der Ton laeuft im Hintergrund, waehrend die Anzeige aufgebaut wird
   if (face == 0) {
     showStatusNow();
   } else if (displayVisible(face)) {  // sonst zeigt das Display Richtung Tisch
-    ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel));
+    ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel), todaySec);
     uiUntil = millis() + PROJECT_SHOW_MS;
   }
   bool wasValid = g.timeValid;
@@ -145,6 +157,7 @@ static void teachIn() {
   // regulaer (nach SETTLE_MS) als neues Ereignis uebernommen.
   if (g.face != kUnknown) commit(kUnknown, Vec3{0, 0, 1});
   still.reset();
+  shake.reset();
   tracker.restore(kUnknown);
 }
 
@@ -163,10 +176,18 @@ static String statusHtml() {
   }
   char tail[200];
   snprintf(tail, sizeof tail,
-           "</table><p>Aktiv: %s<br>Akku: %.2f V<br>Log: %u Bytes</p>"
-           "<p><a href='/log.csv'>log.csv herunterladen</a></p>",
+           "</table><p>Aktiv: %s<br>Akku: %.2f V<br>Logs: %u Bytes</p>"
+           "<p><a href='/log.csv'>Alle Tage (log.csv)</a></p><p>Ein Tag:<br>",
            PROJECT_NAMES[projectForFace(g.face)], hal::batteryMv() / 1000.f, (unsigned)store::logSize());
   h += tail;
+  // neueste zuerst, hoechstens 60 (alle stehen in log.csv)
+  std::vector<std::pair<String, size_t>> logs;
+  store::listLogs([&](const char* key, size_t size) { logs.emplace_back(key, size); });
+  int shown = 0;
+  for (size_t i = logs.size(); i-- > 0 && shown < 60; ++shown) {
+    h += "<a href='/tag?d=" + logs[i].first + "'>" + logs[i].first + "</a> " + String((unsigned)logs[i].second) + " B<br>";
+  }
+  h += "</p>";
   return h;
 }
 
@@ -265,6 +286,14 @@ void setup() {
     showStatusNow();
   } else {
     ui::off();  // Bewegung: Display aus lassen, bis es etwas zu zeigen gibt
+    // Lautsprecher frueh starten: er braucht eine Anlaufzeit, sonst geht der Ton des ersten Wechsels verloren
+    if (hal::wakeCause() == ESP_SLEEP_WAKEUP_EXT0) {
+      uint32_t tSnd = millis();
+      ui::prepareSound();
+      log_i("Lautsprecher vorgestartet in %u ms", (unsigned)(millis() - tSnd));
+    }
+    // Liegend (Pause): kurz wach bleiben, damit ein Schuetteln erkannt wird, auch wenn der Wecker vor dem Boot endete
+    if (g.face == 0 && g.restless == 0) awakeUntil = millis() + SHAKE_GRACE_MS;
   }
   sessionStart = millis();
 }
@@ -294,14 +323,22 @@ void loop() {
   if (millis() - lastSample >= SAMPLE_MS) {
     lastSample = millis();
     Vec3 a;
-    if (hal::readAccel(a)) still.add(a);
+    if (hal::readAccel(a)) {
+      still.add(a);
+      if (shake.add(a, millis())) {
+        // nur liegend (Seite 0 uebernommen), nicht in der Tasche (unruhige Sitzungen) und nicht waehrend einer Anzeige
+        bool show = tracker.committed() == 0 && g.restless == 0 && (int32_t)(uiUntil - millis()) <= 0;
+        log_i("Schuetteln erkannt: %s", show ? "Uebersicht" : "ignoriert (nicht liegend, unruhig oder Anzeige aktiv)");
+        if (show) showStatusNow();
+      }
+    }
     bool isStill = still.still();
     int face = isStill ? classifyRing(model, still.mean(), tracker.candidate(), ringParams) : tracker.candidate();
     if (tracker.update(face, isStill, millis())) commit(tracker.committed(), still.mean());
   }
 
   // Schlafen?
-  bool busy = (int32_t)(uiUntil - millis()) > 0 || M5.BtnA.isPressed();
+  bool busy = (int32_t)(uiUntil - millis()) > 0 || (int32_t)(awakeUntil - millis()) > 0 || M5.BtnA.isPressed();
   if (!busy && tracker.settled()) goToSleep(false);
   if (!busy && millis() - sessionStart > SESSION_MAX_MS) goToSleep(true);
 }
