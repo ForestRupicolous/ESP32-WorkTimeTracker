@@ -56,6 +56,61 @@ int classify(const FaceModel& m, const Vec3& accel, float matchDeg, float* bestD
   return (deg <= matchDeg) ? best : kUnknown;
 }
 
+static Vec3 cross3(const Vec3& a, const Vec3& b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// Drehachse des Rings (Einheitsvektor). Muenze: Display-Normale (Seite 0). Prisma: Normale der
+// Ringebene aus den Kreuzprodukten benachbarter Ringseiten (das Vorzeichen ist egal, es zaehlt der Betrag).
+static Vec3 ringAxis(const FaceModel& m) {
+  if (kCoin) return normalize(m.up[0]);
+  Vec3 s{0, 0, 0};
+  for (int i = 0; i < kRing; ++i) {
+    Vec3 c = cross3(m.up[kRingFirst + i], m.up[kRingFirst + (i + 1) % kRing]);
+    s.x += c.x; s.y += c.y; s.z += c.z;
+  }
+  return normalize(s);
+}
+
+int classifyRing(const FaceModel& m, const Vec3& accel, int current, const RingParams& p) {
+  Vec3 a = normalize(accel);
+  if (norm(a) < 0.5f) return kUnknown;  // kein brauchbarer Messwert
+  Vec3 ax = ringAxis(m);
+  float s = dot(a, ax);
+  if (s > 1.f) s = 1.f;
+  if (s < -1.f) s = -1.f;
+  float phi = acosf(s) * kRad2Deg;  // Winkel zur Drehachse (0 = Display oben)
+  float tilt = fabsf(90.f - phi);   // Abstand von der Ringebene
+  bool inRing = current >= kRingFirst && current < kRingFirst + kRing;
+  if (tilt > (inRing ? p.uprightExitDeg : p.uprightDeg)) {
+    // nicht "in der Drehachse": Muenze auf dem Ruecken = Seite 0, sonst Pause (unbekannt)
+    if (kCoin && phi <= (current == 0 ? p.flatExitDeg : p.flatDeg)) return 0;
+    return kUnknown;
+  }
+  // naechste Ringseite nach dem Winkel in der Ringebene (Messwert und Seitenvektoren dorthin projiziert)
+  Vec3 pr{a.x - s * ax.x, a.y - s * ax.y, a.z - s * ax.z};
+  float pn = norm(pr);
+  if (pn < 1e-3f) return kUnknown;
+  int best = kUnknown;
+  float bestAng = 1e9f, curAng = 1e9f;
+  for (int i = 0; i < kRing; ++i) {
+    int k = kRingFirst + i;
+    float d = dot(m.up[k], ax);
+    Vec3 f{m.up[k].x - d * ax.x, m.up[k].y - d * ax.y, m.up[k].z - d * ax.z};
+    float fn = norm(f);
+    if (fn < 1e-3f) continue;
+    float c = dot(pr, f) / (pn * fn);
+    if (c > 1.f) c = 1.f;
+    if (c < -1.f) c = -1.f;
+    float ang = acosf(c) * kRad2Deg;
+    if (ang < bestAng) { bestAng = ang; best = k; }
+    if (k == current) curAng = ang;
+  }
+  // Hysterese: bisherige Seite behalten, solange keine andere um mehr als hystDeg naeher liegt
+  if (inRing && best != current && curAng < 1e8f && curAng - bestAng <= p.hystDeg) return current;
+  return best;
+}
+
 bool displayVisible(int face) {
   if (face < 0) return false;
   if (kCoin) return true;  // Ruecken unten: Display oben; aufgestellt: Display senkrecht

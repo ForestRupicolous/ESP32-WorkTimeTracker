@@ -50,7 +50,7 @@ static Sim makeSim() {
   return s;
 }
 
-static constexpr float kMatch = 0.4f * kStepDeg;  // wie MATCH_DEG in config.h
+static constexpr float kMatch = 0.4f * kStepDeg;  // Fangbereich der alten classify()
 
 static void test_layout() {
 #if defined(PRISMA_PRISMA10)
@@ -59,8 +59,10 @@ static void test_layout() {
   CHECK(kCoin && kFaces == PRISMA_RING + 1 && kRing == PRISMA_RING);
   CHECK(fabsf(kStepDeg * kRing - 360.f) < 1e-3f);
 #endif
-  printf("  Bauform: %s, %d Seiten, Fangbereich +-%.1f Grad\n", kCoin ? "Muenze" : "Prisma", kFaces, kMatch);
-  CHECK(kMatch < kStepDeg / 2);  // Fangbereiche ueberlappen nicht
+  printf("  Bauform: %s, %d Seiten, Hysterese %.1f Grad\n", kCoin ? "Muenze" : "Prisma", kFaces,
+         defaultRingParams().hystDeg);
+  CHECK(kMatch < kStepDeg / 2);  // Fangbereiche der alten classify() ueberlappen nicht
+  CHECK(defaultRingParams().hystDeg < kStepDeg / 2);  // Hysterese kleiner als der halbe Seitenabstand
 }
 
 static void test_classify_default() {
@@ -163,6 +165,124 @@ static void test_teachin_implausible() {
   }
 }
 
+// ---------------------------------------------------------------- Ringerkennung (classifyRing)
+static Vec3 cr(const Vec3& a, const Vec3& b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// Vorzeichen der Drehung um 'ax', die von Ringseite 0 zur naechsten fuehrt (haengt von der Achsrichtung ab)
+static float ringSign(const FaceModel& m, const Vec3& ax) {
+  const Vec3& a = m.up[kRingFirst];
+  const Vec3& n = m.up[kRingFirst + 1];
+  return angleDeg(rot(a, ax, kStepDeg), n) < angleDeg(rot(a, ax, -kStepDeg), n) ? 1.f : -1.f;
+}
+
+// Lage in der Ringebene, 'ang' Grad hinter der ersten Ringseite, in Richtung der naechsten Seite
+static Vec3 atRing(const FaceModel& m, const Vec3& ax, float sgn, float ang) {
+  return rot(m.up[kRingFirst], ax, sgn * ang);
+}
+
+static bool isRingFace(int f) { return f >= kRingFirst && f < kRingFirst + kRing; }
+
+// exact: Seiten gleichmaessig verteilt (Standardmodell), dann sind auch die Schaltwinkel genau vorhersagbar
+static void ring_checks(const FaceModel& m, const Vec3& ax, bool exact) {
+  const RingParams p = defaultRingParams();
+  const float sg = ringSign(m, ax);
+
+  // 1) keine Totzone, kein Flackern: zweimal rundherum, die erkannte Seite wird mitgefuehrt
+  int cur = kUnknown, bad = 0, flips = 0;
+  for (float ang = 0.f; ang < 720.f; ang += 0.25f) {
+    int f = classifyRing(m, atRing(m, ax, sg, ang), cur, p);
+    if (!isRingFace(f)) ++bad;
+    if (f != cur) ++flips;
+    cur = f;
+  }
+  CHECK(bad == 0);
+  CHECK(exact ? flips == 2 * kRing + 1 : flips <= 2 * kRing + 1);  // ein Wechsel je Seitengrenze und Runde
+
+  // 2) auf einer Seite liegend wird genau diese erkannt, auch wenn die bisherige Seite die Nachbarin war
+  for (int k = kRingFirst; k < kRingFirst + kRing; ++k) {
+    CHECK(classifyRing(m, m.up[k], kUnknown, p) == k);
+    CHECK(classifyRing(m, m.up[k], kRingFirst + (k - kRingFirst + 1) % kRing, p) == k);
+  }
+
+  // 3) Hysterese: hin und zurueck schalten bei verschiedenen Winkeln, Abstand = hystDeg
+  if (exact) {
+    for (int i = 0; i < kRing; ++i) {
+      const int fi = kRingFirst + i, fn = kRingFirst + (i + 1) % kRing;
+      const float base = i * kStepDeg;
+      float up = -1.f, down = -1.f;
+      for (float d = 0.f; d <= kStepDeg; d += 0.05f)
+        if (classifyRing(m, atRing(m, ax, sg, base + d), fi, p) != fi) { up = d; break; }
+      for (float d = kStepDeg; d >= 0.f; d -= 0.05f)
+        if (classifyRing(m, atRing(m, ax, sg, base + d), fn, p) != fn) { down = d; break; }
+      CHECK(fabsf(up - (kStepDeg / 2 + p.hystDeg / 2)) < 0.2f);
+      CHECK(fabsf(down - (kStepDeg / 2 - p.hystDeg / 2)) < 0.2f);
+      CHECK(up - down > p.hystDeg - 0.3f);
+    }
+  }
+
+  // 4) Kippen aus der Ringebene: Eintritt bis uprightDeg, Verbleib bis uprightExitDeg
+  const int f2 = kRingFirst + 2;
+  const Vec3 c2 = atRing(m, ax, sg, 2 * kStepDeg);
+  const Vec3 ta = cr(ax, c2);  // Kippachse in der Ebene, senkrecht zur Seitenrichtung
+  for (float t : {-30.f, -10.f, 10.f, 30.f}) CHECK(classifyRing(m, rot(c2, ta, t), kUnknown, p) == f2);
+  for (float t : {-40.f, 40.f}) {
+    CHECK(classifyRing(m, rot(c2, ta, t), kUnknown, p) == kUnknown);  // Eintritt erst ab 35 Grad Abstand
+    CHECK(classifyRing(m, rot(c2, ta, t), f2, p) == f2);              // Verbleib bis 45 Grad
+  }
+  CHECK(classifyRing(m, rot(c2, ta, 52.f), f2, p) == kUnknown);       // jenseits 45 Grad: raus
+  CHECK(classifyRing(m, Vec3{0, 0, 0}, f2, p) == kUnknown);           // kein Messwert
+
+  if (kCoin) {
+    const Vec3 up0 = m.up[0];
+    const Vec3 down{-up0.x, -up0.y, -up0.z};
+    const Vec3 ra = m.up[kRingFirst];  // Kippachse in der Ringebene
+    CHECK(classifyRing(m, up0, kUnknown, p) == 0);                          // auf dem Ruecken
+    CHECK(classifyRing(m, down, kUnknown, p) == kUnknown);                  // Display unten
+    CHECK(classifyRing(m, down, kRingFirst, p) == kUnknown);
+    CHECK(classifyRing(m, rot(up0, ra, 25.f), kUnknown, p) == 0);           // Eintritt bis 30 Grad
+    CHECK(classifyRing(m, rot(up0, ra, 35.f), kUnknown, p) == kUnknown);
+    CHECK(classifyRing(m, rot(up0, ra, 35.f), 0, p) == 0);                  // Verbleib bis 40 Grad
+    CHECK(classifyRing(m, rot(up0, ra, 45.f), 0, p) == kUnknown);
+  } else {
+    const Vec3 nax{-ax.x, -ax.y, -ax.z};
+    CHECK(classifyRing(m, ax, kUnknown, p) == kUnknown);  // aufrecht stehend = Pause
+    CHECK(classifyRing(m, ax, 3, p) == kUnknown);
+    CHECK(classifyRing(m, nax, 3, p) == kUnknown);
+    CHECK(classifyRing(m, m.up[0], kUnknown, p) == 0);    // Seite 0 gehoert zum Ring
+  }
+}
+
+static void test_ring() {
+  const FaceModel d = defaultModel();
+  ring_checks(d, kCoin ? Vec3{0, 0, 1} : Vec3{0, 1, 0}, true);
+
+  // angelerntes Modell mit schiefer Sensorlage, wie im Betrieb
+  Sim s = makeSim();
+  TeachIn t;
+  t.start();
+  CHECK(t.offer(s.face(0, 1.5f)));
+  for (int k = 1; k < kFaces; ++k) CHECK(t.offer(s.face(k, (k % 2) ? 2.f : -2.5f)));
+  CHECK(t.done());
+  const FaceModel m = t.result();
+  ring_checks(m, s.axis, false);
+
+  std::mt19937 rng(7);
+  std::normal_distribution<float> noise(0.f, 0.02f);
+  const RingParams p = defaultRingParams();
+  int ok = 0, tot = 0;
+  for (int k = kRingFirst; k < kRingFirst + kRing; ++k)
+    for (int i = 0; i < 200; ++i) {
+      Vec3 a = s.face(k, noise(rng) * 100.f);  // 2 Grad Lagefehler (1 sigma)
+      a.x += noise(rng); a.y += noise(rng); a.z += noise(rng);  // 20 mg Sensorrauschen
+      ok += classifyRing(m, a, kUnknown, p) == k;
+      ++tot;
+    }
+  printf("  Ringerkennung mit Rauschen: %d/%d korrekt, Hysterese %.1f Grad\n", ok, tot, p.hystDeg);
+  CHECK(ok >= tot * 995 / 1000);
+}
+
 static void test_still_detector() {
   StillDetector sd(10, 3.f);
   Vec3 g{0, 0, 1};
@@ -253,6 +373,7 @@ int main() {
   test_up_quadrant();
   test_teachin_and_classify();
   test_teachin_implausible();
+  test_ring();
   test_still_detector();
   test_tracker();
   test_accrue();

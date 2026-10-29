@@ -1,7 +1,7 @@
 // Zeitprisma – Projektzeit-Wuerfel mit M5Stack StickS3 (12-Eck-Muenze oder Zehnkant-Prisma)
 //
 // Ablauf (POWER_DEEPSLEEP=1):
-//   Bewegung weckt den ESP32 -> Lage abtasten -> neue Seite 3 s ruhig? -> Ereignis loggen
+//   Bewegung weckt den ESP32 -> Lage abtasten -> neue Seite SETTLE_MS ruhig? -> Ereignis loggen
 //   -> wieder Deep Sleep. Zustand ueberlebt im RTC-RAM, Zeit laeuft in der RTC weiter.
 //
 // Bedienung:
@@ -39,6 +39,8 @@ static constexpr time_t kEpochSane = 1704067200;  // 2024-01-01
 static FaceModel model;
 static StillDetector still(STILL_WINDOW, STILL_DEV_DEG);
 static Tracker tracker(SETTLE_MS);
+static const RingParams ringParams{RING_HYST_DEG, RING_UPRIGHT_DEG, RING_UPRIGHT_EXIT_DEG, FLAT_DEG,
+                                   FLAT_EXIT_DEG};
 static uint32_t sessionStart = 0;
 static uint32_t uiUntil = 0;  // solange etwas angezeigt wird, nicht schlafen
 
@@ -90,7 +92,7 @@ static void commit(int face, const Vec3& accel) {
 static void teachIn() {
   TeachIn t;
   t.start();
-  StillDetector sd(STILL_WINDOW * 2, STILL_DEV_DEG);  // 1 s ruhig
+  StillDetector sd(TEACH_WINDOW, STILL_DEV_DEG);  // 1 s ruhig
   ui::setRotation(DISP_ROT_FLAT);
   ui::showText("Teach-in", "Display nach oben legen", "und ruhig liegen lassen");
   ui::longBeep();
@@ -206,7 +208,7 @@ static void goToSleep(bool restless) {
     if (hal::wokeByButton()) break;
     Vec3 a;
     if (!hal::readAccel(a)) continue;
-    if (classify(model, a, MATCH_DEG) != tracker.committed()) break;
+    if (classifyRing(model, a, tracker.committed(), ringParams) != tracker.committed()) break;
   }
   still.reset();
   tracker.restore(tracker.committed());
@@ -278,7 +280,7 @@ void loop() {
     Vec3 a;
     if (hal::readAccel(a)) still.add(a);
     bool isStill = still.still();
-    int face = isStill ? classify(model, still.mean(), MATCH_DEG) : tracker.candidate();
+    int face = isStill ? classifyRing(model, still.mean(), tracker.candidate(), ringParams) : tracker.candidate();
     if (tracker.update(face, isStill, millis())) commit(tracker.committed(), still.mean());
   }
 

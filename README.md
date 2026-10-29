@@ -3,8 +3,8 @@
 Projektzeit-Tracker im Stil von TimeFlip mit M5Stack StickS3, Fortsetzung des Projekts „M5StickC S3 Projektzeitschreiber“.
 Entwicklung (Hardware-Fakten mit Quellen, Befehle, Konventionen, nächste Schritte): siehe `CLAUDE.md`.
 
-> **Stand, Einschränkungen zuerst:** Die Firmware (`muenze8`) ist am 29.10.2026 auf einen StickS3 geflasht worden (esptool, Hashes verifiziert) und **startet**: Die Startzeile wurde mitgeschnitten, M5PM1 (Akku 4170 mV gelesen) und BMI270 sind ohne Fehlermeldung initialisiert, das WLAN hat sich offenbar verbunden. Teach-in, Seitenerkennung, Wecken per Bewegung, Tasten, Töne und Stromverbrauch sind **nicht getestet**. Gehäuse nicht gedruckt.
-> Am PC geprüft (29.10.2026): Kernlogik in Host-Tests (Münze 8 = 130, Münze 12 = 188, Prisma 10 = 140 Prüfungen), Gehäuse-Passung gegen das M5-Strukturmodell (rechnerisch) und dass alle drei Firmware-Varianten mit der ESP32-S3-Toolchain kompilieren (`make build`). „Kompiliert“ heißt nicht „läuft“.
+> **Stand, Einschränkungen zuerst:** Die Firmware (`muenze8`) ist am 29.10.2026 auf einen StickS3 geflasht worden (esptool, Hashes verifiziert) und **startet**: Die Startzeile wurde mitgeschnitten, M5PM1 (Akku 4170 mV gelesen) und BMI270 sind ohne Fehlermeldung initialisiert, das WLAN hat sich offenbar verbunden. Rückmeldung nach dem Test am Gerät (29.10.2026): Der Seitenwechsel soll deutlich schneller erfolgen, und solange der Stick ca. in der Drehachse steht, soll immer ein Projekt erkannt werden, mit Hysterese. Das ist als Ringerkennung umgesetzt (siehe Funktionsweise), am PC getestet, **am Gerät noch nicht bestätigt**. Wecken per Bewegung, Tasten, Töne und Stromverbrauch sind nicht getestet. Gehäuse nicht gedruckt.
+> Am PC geprüft (29.10.2026): Kernlogik in Host-Tests (Münze 8 = 236, Münze 12 = 326, Prisma 10 = 255 Prüfungen), Gehäuse-Passung gegen das M5-Strukturmodell (rechnerisch) und dass alle drei Firmware-Varianten mit der ESP32-S3-Toolchain kompilieren (`make build`). „Kompiliert“ heißt nicht „läuft“.
 
 **Standard: 8-Eck-Münze**, 53,8 mm Schlüsselweite (ca. 57,6 mm über die gefasten Ecken) × 22 mm.
 - Der Stick liegt flach in der Mitte, das Display zeigt nach vorne.
@@ -42,7 +42,7 @@ Makefile    make test | build | flash | log | ref | gehaeuse
   1. WLAN-Zugangsdaten in `firmware/include/config_local.h` eintragen (Vorlage: `config_local.h.example`; die Datei steht in `.gitignore` und kommt nie nach GitHub), Projektnamen in `firmware/include/config.h`.
   2. Flashen: siehe Abschnitt „Flashen“ (`make flash`, bei Problemen Download-Modus).
   3. Beim ersten Start: Uhrzeit per NTP holen, dann Teach-in. Dazu das Display nach oben legen und danach die Seiten 1…8 der Reihe nach nach oben stellen, jeweils ca. 1 s ruhig.
-- **Seitenwechsel:** Nach 3 s Ruhe wird die neue Seite übernommen, mit einem Fangbereich von ±18°.
+- **Seitenwechsel:** Steht der Stick ca. in der Drehachse (Münze auf dem Rand), wird immer die nächste Seite erkannt, auch zwischen zwei Seiten, mit Hysterese an den Seitengrenzen. Die neue Seite wird rund 0,8 s nach dem Stillstand übernommen (0,2 s Ruhefenster plus 0,6 s).
 - **Töne:** 5 ist ein langer Ton, der Rest kurze (8 = lang + 3 kurz). Pause ist ein tiefer Ton.
 - **Anzeige:** Ist die Münze aufgestellt, dreht sich der Text automatisch aufrecht. Die Richtung muss einmal kalibriert werden (`DISP_ROT_OFFSET/DIR`). Bei 8 Seiten steht der Text auf den schrägen Seiten (1, 3, 5, 7) um 45° schief.
 - **Taste A (vorne):**
@@ -78,9 +78,15 @@ Alles hier ist aus dem Code gelesen. Am Gerät bestätigt ist nur der Start (sie
 5. **Wecken per Taste A:** Status für 8 s. **Wecken per Bewegung:** Display bleibt aus, bis es etwas zu zeigen gibt.
 
 ### Seitenerkennung (alle 20 ms)
-- **Ruhig** heißt: 25 Samples (0,5 s) weichen alle weniger als 3° vom Mittel ab, und der Betrag liegt zwischen 0,8 und 1,2 g.
-- **Seite** = die gelernte Seite, deren Vektor höchstens den Fangbereich (0,4 × Schrittwinkel, bei 8 Seiten ±18°) vom Mittelwert entfernt ist. Sonst „unbekannt“ (−1), das zählt als Pause.
-- Eine neue Seite wird erst übernommen, wenn sie **3 s ununterbrochen ruhig** lag. Bewegung setzt den Timer zurück.
+- **Ruhig** heißt: 10 Samples (0,2 s, `STILL_WINDOW`) weichen alle weniger als 3° vom Mittel ab, und der Betrag liegt zwischen 0,8 und 1,2 g. Nur dann wird die Seite bestimmt, sonst bleibt der bisherige Kandidat.
+- **Ringerkennung ohne Totzone** (`classifyRing()` in `prisma_core`): Liegt der Beschleunigungsvektor ca. in der Ringebene („Stick in der Drehachse“, Rollachse waagrecht), wird **immer** die nächste Randseite geliefert, auch zwischen zwei Seiten. Die Ringebene steht senkrecht zur Drehachse (Münze: Display-Normale, Prisma: Längsachse). Verglichen wird der Winkel in der Ringebene, ein Kippen aus der Ebene verfälscht ihn nicht.
+- **Hysterese**, jeweils bezogen auf die bisherige Seite (der aktuelle Kandidat):
+  - *Nachbarseiten:* Gewechselt wird erst, wenn eine andere Seite um mehr als `RING_HYST_DEG` näher liegt (20 % des Seitenabstands, bei 8 Seiten 9°). Bei 8 Seiten schaltet es von Seite i zu i+1 bei 27° Abstand zur Mitte von i, zurück erst bei 18°. Dazwischen bleibt die bisherige Seite.
+  - *Ringebene:* Eintritt bei höchstens 35° Kippung aus der Ebene (`RING_UPRIGHT_DEG`), Verbleib bis 45° (`RING_UPRIGHT_EXIT_DEG`).
+  - *Münze auf dem Rücken (Seite 0):* Eintritt bei höchstens 30° von „Display oben“ (`FLAT_DEG`), Verbleib bis 40° (`FLAT_EXIT_DEG`).
+- **Außerhalb** davon ist die Lage „unbekannt“ (−1) und zählt als Pause: Münze mit Display unten oder stärker schräg, Prisma aufrecht stehend. Beim Prisma gehört Seite 0 zum Ring.
+- Eine neue Seite wird erst übernommen, wenn sie **`SETTLE_MS` = 0,6 s** ununterbrochen ruhig lag, nach dem 0,2 s Ruhefenster also rund 0,8 s nach dem Stillstand. Bewegung setzt den Timer zurück. Nach dem Wecken aus dem Deep Sleep kommt der Start dazu (die Startzeile erscheint rund 1 s nach dem Reset).
+- Ältere Version (bis 29.10.2026): Fangbereich ±18° um jede Seite mit 9° Totzone dazwischen (= Pause), 0,5 s Ruhefenster und 3 s Entprellung, zusammen ca. 3,5 s.
 - **Übernehmen:** Zeit des vorigen Abschnitts dem alten Projekt gutschreiben (nur bei gültiger Zeit, an Mitternacht geteilt, im Gerät bleibt nur der heutige Tag), CSV-Zeile anhängen, seriell „Seite n -> Name“, Töne, Anzeige (Seite 0: Status 8 s; Randseite: Projektfarbe und Name 2,5 s, aufrecht gedreht), NTP-Sync, wenn der letzte älter als 6 h ist.
 - Projektnummer: Seite 0 und „unbekannt“ = Projekt 0 (Pause), Seite k = Projekt k.
 
@@ -129,7 +135,7 @@ Eigene Ausgaben der Firmware:
 | Display „Zeit unbekannt“ | WLAN oder NTP fehlgeschlagen. `config_local.h` prüfen (SSID, Passwort, nur 2,4-GHz-Netz), seriell „WLAN nicht erreichbar“. |
 | „Hardwarefehler / PM1/IMU pruefen“ | M5PM1 oder BMI270 nicht per I2C erreichbar. I2C nur über `M5.In_I2C` nutzen. |
 | Teach-in „abgebrochen (Zeit)“ oder „Reihenfolge falsch?“ | Siehe Teach-in. Taste A 6 s halten startet es neu. |
-| Seite wird nicht erkannt oder springt | Lage 3 s ruhig halten, Fangbereich ±18°, ggf. Teach-in neu. |
+| Seite wird nicht erkannt, springt oder kommt zu spät | Der Stick muss ca. in der Drehachse stehen (bis 35° aus der Ebene gekippt). Die Erkennung dauert rund 0,8 s nach dem Stillstand (`STILL_WINDOW` + `SETTLE_MS`), nach dem Wecken aus dem Deep Sleep kommt der Start (ca. 1 s) dazu. Springt es an einer Seitengrenze: `RING_HYST_DEG` erhöhen. Sonst Teach-in neu. |
 | Nach dem Flashen kommt sofort wieder das Teach-in | Gewollt: Prüfwert und Modell-Version ändern sich mit der Bauform, das Flashen löscht den RTC-Zustand. |
 
 ## Strom

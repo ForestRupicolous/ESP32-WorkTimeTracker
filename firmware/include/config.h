@@ -24,9 +24,7 @@ static const char* const PROJECT_NAMES[] = {
     "Projekt 5", "Projekt 6", "Projekt 7", "Projekt 8",
 };
 #endif
-// Fangbereich um jede Seite: 40 % des Winkels zwischen Nachbarseiten
-// (8 Seiten: +-18 Grad, 12 Seiten: +-12 Grad, Prisma 10: +-14,4 Grad)
-#define MATCH_DEG        (0.4f * prisma::kStepDeg)
+// Seitenerkennung: Ringerkennung ohne Totzone, Parameter im Block "Erkennung" weiter unten.
 // RGB565-Farben fuer die Bestaetigung am Display (Index = Projekt)
 static const uint16_t PROJECT_COLORS[] = {
     0x7BEF,  // grau (Pause)
@@ -75,10 +73,19 @@ static const uint16_t PROJECT_COLORS[] = {
 
 // ---------------------------------------------------------------- Erkennung
 #define SAMPLE_MS        20      // 50 Hz
-#define STILL_WINDOW     25      // 25 Samples = 0,5 s
+#define STILL_WINDOW     10      // 10 Samples = 0,2 s ruhig, bevor eine Seite gezaehlt wird
 #define STILL_DEV_DEG    3.0f    // max. Abweichung im Fenster
-#define SETTLE_MS        3000    // so lange muss eine neue Seite ruhig liegen
+#define SETTLE_MS        600     // so lange muss eine neue Seite danach ruhig liegen (Wechsel ca. 0,8 s nach Stillstand)
+#define TEACH_WINDOW     50      // Teach-in: 50 Samples = 1 s ruhig je Seite
 #define SESSION_MAX_MS   45000   // spaetestens dann wieder schlafen (z. B. in der Tasche)
+// Ringerkennung (prisma_core.h, classifyRing): Steht der Stick ca. in der Drehachse (die Beschleunigung
+// liegt ca. in der Ringebene), wird immer die naechste Seite erkannt, auch zwischen zwei Seiten.
+// Die Hysterese verhindert Flackern an den Seitengrenzen. Standardwerte kommen aus prisma_core.h.
+#define RING_HYST_DEG         (prisma::kRingHystFrac * prisma::kStepDeg)  // 8 Seiten: 9 Grad
+#define RING_UPRIGHT_DEG      prisma::kUprightDeg      // Eintritt: hoechstens 35 Grad aus der Ringebene
+#define RING_UPRIGHT_EXIT_DEG prisma::kUprightExitDeg  // Verbleib: bis 45 Grad
+#define FLAT_DEG              prisma::kFlatDeg         // Muenze auf dem Ruecken (Seite 0): bis 30 Grad von "Display oben"
+#define FLAT_EXIT_DEG         prisma::kFlatExitDeg     // ... behalten bis 40 Grad
 
 // ---------------------------------------------------------------- Strom
 // 1 = Deep Sleep, Aufwachen per IMU-Bewegungsinterrupt ueber M5PM1 (sparsam)

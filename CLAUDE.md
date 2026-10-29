@@ -27,7 +27,7 @@ TimeFlip-artiger Zeiterfasser. **Standard: 8-Eck-„Münze“**, 53,8 mm Schlüs
 ## Struktur
 ```
 firmware/                    PlatformIO (Arduino, M5Unified, M5PM1), Envs muenze8 | muenze12 | prisma10
-  include/config.h           Projektnamen, WLAN-Platzhalter, Fangbereich, Display-Rotation, Strom
+  include/config.h           Projektnamen, WLAN-Platzhalter, Erkennung (Zeiten, Ringparameter), Display-Rotation, Strom
   include/config_local.h     echte WLAN-Zugangsdaten (gitignored, Vorlage config_local.h.example)
   lib/prisma_core/           hardwareunabhängig: Seitenerkennung, Ruhe, Entprellen, Teach-in,
                              Tagessummen, CSV  (am PC testbar)
@@ -61,7 +61,7 @@ make ref && make gehaeuse  # Gehäuse erzeugen und gegen das M5-Modell prüfen
 ## Konventionen
 - **I2C nur über `M5.In_I2C`** (m5::I2C_Class), auch für M5PM1 (`pm1.begin(&M5.In_I2C)`) und BMI270. **Kein Arduino-`Wire`** auf G47/G48: lgfx-I2C legt die Pins bei jeder Transaktion neu auf seinen Port.
 - Neue Logik möglichst in `lib/prisma_core` und mit Test in `test/host/test_core.cpp`. Die Tests müssen für alle drei Bauformen laufen.
-- Bauform-Konstanten: `kCoin`, `kRing`, `kFaces`, `kStepDeg`, `kRingFirst`. Fangbereich: `MATCH_DEG = 0,4 · kStepDeg`.
+- Bauform-Konstanten: `kCoin`, `kRing`, `kFaces`, `kStepDeg`, `kRingFirst`. Seitenerkennung im Betrieb: `classifyRing()` mit `RingParams` (keine Totzone; Hysterese `RING_HYST_DEG` = 0,2 · kStepDeg, Ringebene 35°/45°, Seite 0 30°/40°; Werte in `config.h`). `classify()` mit Fangbereich bleibt nur für Tests.
 - Texte am Display in ASCII (keine Umlaute, die Fonts haben sie nicht). Code-Kommentare ebenfalls ASCII.
 - Gehäuse: Nach jeder Parameteränderung `--check ref/StickS3.stl` ausführen. Mindestwand 1,6 mm; Taste A braucht ≥ 0,3 mm Luft zur Vorderseite.
 - Gedruckt wird ohne Stützen. Die Münze liegt beim Druck mit der Rückseite auf dem Bett; einzige Brücke ist das USB-Loch (13,5 mm).
@@ -73,7 +73,7 @@ make ref && make gehaeuse  # Gehäuse erzeugen und gegen das M5-Modell prüfen
 Ende der claude.ai-Sitzung (28.10.2026): Firmware dort nie mit der ESP32-Toolchain gebaut (kein Zugriff), geprüft nur gegen Stub-Header mit den echten M5Unified-/M5PM1-Signaturen und per Host-Tests.
 
 In Claude Code nachgeprüft (29.10.2026):
-- `make test`: Münze 8 = 130, Münze 12 = 188, Prisma 10 = 140 Prüfungen, alle grün, keine Warnungen (`-Wall -Wextra`).
+- `make test`: Münze 8 = 236, Münze 12 = 326, Prisma 10 = 255 Prüfungen, alle grün, keine Warnungen (`-Wall -Wextra`). Stand der ZIP war 130/188/140; die Mehrzahl sind die neuen Tests der Ringerkennung. Mutationstest: ohne Hysterese fallen 24, mit wieder eingebauter Totzone 28 Prüfungen durch.
 - `make build`: `muenze8`, `muenze12`, `prisma10` kompilieren und linken (PlatformIO 6.2.0, espressif32@6.12.0), 0 Warnungen. `muenze8`: RAM 15,8 %, Flash 34,0 %. Das heißt nur „baut“.
 - Gehäuse: `--check` gegen das M5-Modell besteht für Münze 8 (10 Punkte), Münze 12 (8) und Prisma 10 (14). Die gelieferte STL `zeitprisma_muenze8_22mm_usb.stl` entspricht dem Skript (gleiches Volumen, Eckpunkte um höchstens 0,001 mm verschieden), misst 53,80 × 53,80 × 22,00 mm und ist wasserdicht.
 - Kippgrenzen (gerechnet, Stick-Schwerpunkt = Mitte angenommen): Münze 8 ab 21,0° (flach um ab 20,1°), Münze 12 ab 13,4°, Prisma 10 je nach Seite ab 12,2–18,5°.
@@ -93,7 +93,7 @@ Am Gerät (29.10.2026):
 1. Erledigt (29.10.2026): `make build`, alle drei Envs bauen. Bei neuen M5Unified-/M5PM1-Ständen erneut prüfen (`lib_deps` sind nicht gepinnt).
 2. Erledigt (29.10.2026): geflasht, Startzeile gesehen, M5PM1/BMI270 ohne Fehler. Offen: udev-Regeln erneuern (README, Flashen) und prüfen, ob `make flash` die App danach von selbst startet.
 3. **Weckkette prüfen:** Deep Sleep → Münze bewegen → aufwachen (Weckgrund im Log). Wenn das nicht geht: Fehler suchen; Rückfall ist `POWER_DEEPSLEEP 0`.
-4. Teach-in durchspielen, Erkennung aller 8 Seiten und der Pause prüfen (Fangbereich ±18°).
+4. Teach-in durchspielen, Erkennung aller 8 Seiten und der Pause prüfen. Ringerkennung am Gerät abstimmen (Rückmeldung 29.10.2026: Wechsel deutlich schneller, in der Drehachse immer ein Projekt, mit Hysterese): `RING_HYST_DEG`, `RING_UPRIGHT_DEG`, `SETTLE_MS`, `STILL_WINDOW` in `config.h`.
 5. `DISP_ROT_OFFSET/DIR` so kalibrieren, dass der Text aufgestellt aufrecht steht.
 6. Ruhestrom/Laufzeit: `vbat_mv` im Log über einige Tage beobachten.
 7. Probedruck: Passung der Tasche, Magnet-Halt an der Scheibe (M8 DIN 125), USB-Stecker im Loch, Kippverhalten.

@@ -54,7 +54,35 @@ struct FaceModel {
 FaceModel defaultModel();
 
 // Seite, deren Vektor maximal matchDeg vom Messwert abweicht, sonst kUnknown.
+// Nur noch fuer Tests/Hilfszwecke; im Betrieb erkennt classifyRing() (keine Totzone).
 int classify(const FaceModel& m, const Vec3& accel, float matchDeg, float* bestDeg = nullptr);
+
+// ---------------------------------------------------------------- Ringerkennung ohne Totzone
+// Betriebserkennung. Steht der Stick "in der Drehachse" (Rollachse ca. waagrecht, der
+// Beschleunigungsvektor liegt ca. in der Ringebene), wird IMMER eine Ringseite geliefert, auch
+// zwischen zwei Seiten. Ringebene = Ebene senkrecht zur Drehachse (Muenze: Display-Normale,
+// Prisma: Laengsachse). Hysterese an drei Stellen, jeweils bezogen auf die bisherige Seite 'current':
+//  - Nachbarseiten: von 'current' wird erst gewechselt, wenn eine andere Ringseite um mehr als
+//    hystDeg naeher am Messwert liegt (Winkel in der Ringebene).
+//  - Ringebene: Eintritt bei <= uprightDeg Abstand zur Ebene, Verbleib bis uprightExitDeg.
+//  - Muenze, Seite 0 (Display oben): Eintritt bei <= flatDeg von Seite 0, Verbleib bis flatExitDeg.
+// Sonst kUnknown (Muenze: Display unten oder schraeg; Prisma: aufrecht stehend) = Pause.
+struct RingParams {
+  float hystDeg;         // Hysterese zwischen Nachbarseiten
+  float uprightDeg;      // Eintritt in die Ringebene: hoechstens so weit aus der Ebene gekippt
+  float uprightExitDeg;  // Verbleib in der Ringebene: hoechstens so weit aus der Ebene gekippt
+  float flatDeg;         // Muenze: Seite 0, wenn hoechstens so weit von "Display oben" entfernt
+  float flatExitDeg;     // Muenze: Seite 0 behalten bis zu dieser Entfernung
+};
+constexpr float kRingHystFrac = 0.20f;  // hystDeg = kRingHystFrac * kStepDeg (8 Seiten: 9 Grad)
+constexpr float kUprightDeg = 35.0f;
+constexpr float kUprightExitDeg = 45.0f;
+constexpr float kFlatDeg = 30.0f;
+constexpr float kFlatExitDeg = 40.0f;
+inline RingParams defaultRingParams() {
+  return {kRingHystFrac * kStepDeg, kUprightDeg, kUprightExitDeg, kFlatDeg, kFlatExitDeg};
+}
+int classifyRing(const FaceModel& m, const Vec3& accel, int current, const RingParams& p);
 
 // Seite 0 (Display oben) und unbekannt -> Projekt 0 = Pause, Seite k -> Projekt k
 inline int projectForFace(int face) { return (face <= 0) ? 0 : face; }
