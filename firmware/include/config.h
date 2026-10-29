@@ -73,9 +73,9 @@ static const uint16_t PROJECT_COLORS[] = {
 
 // ---------------------------------------------------------------- Erkennung
 #define SAMPLE_MS        20      // 50 Hz
-#define STILL_WINDOW     10      // 10 Samples = 0,2 s ruhig, bevor eine Seite gezaehlt wird
+#define STILL_WINDOW     6       // 6 Samples = 0,12 s ruhig, bevor eine Seite gezaehlt wird
 #define STILL_DEV_DEG    3.0f    // max. Abweichung im Fenster
-#define SETTLE_MS        600     // so lange muss eine neue Seite danach ruhig liegen (Wechsel ca. 0,8 s nach Stillstand)
+#define SETTLE_MS        250     // so lange muss eine neue Seite danach ruhig liegen (Wechsel ca. 0,4 s nach Stillstand)
 #define TEACH_WINDOW     50      // Teach-in: 50 Samples = 1 s ruhig je Seite
 #define SESSION_MAX_MS   45000   // spaetestens dann wieder schlafen (z. B. in der Tasche)
 // Ringerkennung (prisma_core.h, classifyRing): Steht der Stick ca. in der Drehachse (die Beschleunigung

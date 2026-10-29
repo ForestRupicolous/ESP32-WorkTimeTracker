@@ -6,7 +6,13 @@
 
 namespace hal {
 
-bool begin();                         // nach M5.begin(); M5PM1 + BMI270-Adresse
+// Warmstart nach Deep Sleep: BMI270 ist noch konfiguriert, die M5Unified-IMU-Initialisierung (Reset + 8-KB-Upload,
+// ca. 0,3 s) laesst sich vor M5.begin() sparen (cfg.internal_imu = false). Nur wahr, wenn der Abgleich beim letzten
+// Kaltstart gepasst hat (eigene Lesung == M5.Imu).
+bool warmImuReady();
+
+// nach M5.begin(); M5PM1 + BMI270-Adresse. ownImu = M5.Imu wurde nicht gestartet, hal liest das BMI270 selbst.
+bool begin(bool ownImu = false);
 bool readAccel(prisma::Vec3& a);      // in g, Achsen wie M5Unified
 int  batteryMv();                     // 0 bei Fehler
 esp_sleep_wakeup_cause_t wakeCause();

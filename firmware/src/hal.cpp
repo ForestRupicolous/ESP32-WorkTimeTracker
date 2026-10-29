@@ -20,6 +20,9 @@ namespace {
 M5PM1 pm1;
 bool pm1Ok = false;
 uint8_t bmiAddr = 0;
+bool ownImu = false;                  // BMI270 wird hier gelesen, M5.Imu ist nicht gestartet (Warmstart)
+float accRes = 8.0f / 32768.0f;       // g je LSB, aus ACC_RANGE (Standard +-8 g)
+RTC_DATA_ATTR uint8_t imuFastOk = 0;  // 1 = eigene Lesung stimmte beim Kaltstart mit M5.Imu ueberein
 
 constexpr uint32_t kI2cHz = 400000;
 constexpr gpio_num_t PIN_PM1_IRQ = GPIO_NUM_13;  // M5PM1 PYG1_IRQ
@@ -120,6 +123,42 @@ void powerOffL3B() {
   pm1.gpioSetMode(M5PM1_GPIO_NUM_2, M5PM1_GPIO_MODE_OUTPUT);
   pm1.gpioSetDrive(M5PM1_GPIO_NUM_2, M5PM1_GPIO_DRIVE_PUSHPULL);
   pm1.gpioSetOutput(M5PM1_GPIO_NUM_2, false);
+}
+
+// Eigene Lesung des BMI270 (Rohwerte 0x0C..0x11, +-8 g) im Board-Koordinatensystem. M5Unified bildet die Achsen fuer
+// den StickS3 so ab (IMU_Class.inl, axis_order_yxz | axis_invert_y): X=+Y, Y=-X, Z=+Z. Das angelernte Seitenmodell
+// haengt von diesem Koordinatensystem ab, deshalb gleicht imuSelfCheck() die Abbildung am Geraet ab.
+bool readBmiAccel(float out[3], float res) {
+  uint8_t d[6];
+  if (!bmiR(0x0C, d, 6)) return false;
+  float x = (int16_t)(d[0] | (d[1] << 8)) * res;
+  float y = (int16_t)(d[2] | (d[3] << 8)) * res;
+  float z = (int16_t)(d[4] | (d[5] << 8)) * res;
+  out[0] = y;
+  out[1] = -x;
+  out[2] = z;
+  return true;
+}
+
+// Beim Kaltstart (M5Unified hat das BMI270 initialisiert): eigene Lesung mit M5.Imu vergleichen. Stimmen beide
+// ueberein, darf der naechste Warmstart die M5-IMU-Initialisierung auslassen.
+void imuSelfCheck() {
+  float m[3], e[3];
+  uint8_t rng = 0;
+  if (!M5.Imu.getAccel(&m[0], &m[1], &m[2]) || !bmiR(0x41, &rng, 1) ||
+      !readBmiAccel(e, (2 << (rng & 3)) / 32768.0f)) {
+    imuFastOk = 0;
+    return;
+  }
+  float dev = 0;
+  for (int i = 0; i < 3; ++i) dev = fmaxf(dev, fabsf(m[i] - e[i]));
+  // beide Lesungen muessen eine plausible Schwerkraft zeigen, sonst koennten zwei Nullvektoren "uebereinstimmen"
+  float gm = sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+  float ge = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+  bool plausible = gm > 0.8f && gm < 1.2f && ge > 0.8f && ge < 1.2f;
+  imuFastOk = (plausible && dev < 0.08f) ? 1 : 0;
+  log_i("IMU-Abgleich: M5 (%.3f %.3f %.3f) eigen (%.3f %.3f %.3f) max. Abweichung %.3f g, |g| %.2f/%.2f -> schneller Warmstart %s",
+        m[0], m[1], m[2], e[0], e[1], e[2], dev, gm, ge, imuFastOk ? "erlaubt" : "NICHT erlaubt");
 }
 
 // Nach dem Umkonfigurieren des BMI270 loest die any-motion-Erkennung einmal aus (am 29.10.2026 gemessen: ca.
@@ -258,9 +297,25 @@ void diagTraceInt(uint32_t ms) {
 
 namespace hal {
 
-bool begin() {
+bool warmImuReady() { return imuFastOk && esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_UNDEFINED; }
+
+bool begin(bool ownImuMode) {
+  ownImu = ownImuMode;
   pm1Ok = (pm1.begin(&M5.In_I2C) == M5PM1_OK);
   bool imuOk = detectBmi();
+  if (ownImu) {
+    // Warmstart ohne M5-IMU-Init: Zustand des BMI270 pruefen (INTERNAL_STATUS = init ok), sonst Init nachholen
+    uint8_t st = 0, rng = 0;
+    if (imuOk && bmiR(0x21, &st, 1) && bmiR(0x41, &rng, 1) && (st & 0x0F) == 0x01) {
+      accRes = (2 << (rng & 3)) / 32768.0f;
+    } else {
+      log_w("BMI270 nicht mehr initialisiert, M5-Init nachgeholt");
+      ownImu = false;
+      imuFastOk = 0;
+      M5.Imu.begin(&M5.In_I2C, M5.getBoard());
+    }
+  }
+  if (!ownImu && imuOk) imuSelfCheck();
 #if WAKE_DIAG
   diagCapture();  // IRQ-Quellen lesen, bevor sie geloescht werden
 #endif
@@ -270,7 +325,13 @@ bool begin() {
   return pm1Ok && imuOk;
 }
 
-bool readAccel(prisma::Vec3& a) { return M5.Imu.getAccel(&a.x, &a.y, &a.z); }
+bool readAccel(prisma::Vec3& a) {
+  if (!ownImu) return M5.Imu.getAccel(&a.x, &a.y, &a.z);
+  float v[3];
+  if (!readBmiAccel(v, accRes)) return false;
+  a = {v[0], v[1], v[2]};
+  return true;
+}
 
 int batteryMv() {
   uint16_t mv = 0;

@@ -219,26 +219,36 @@ static void goToSleep(bool restless) {
 
 // ---------------------------------------------------------------- Arduino
 void setup() {
+  uint32_t tSetup = millis();  // Zeit von Chip-Start bis setup() (ohne ROM und Bootloader)
+  bool cold = (g.magic != kMagic);
+  // Wecken aus dem Deep Sleep: das BMI270 ist noch konfiguriert, die M5-IMU-Initialisierung (ca. 0,3 s) entfaellt
+  bool ownImu = !cold && hal::warmImuReady();
   auto cfg = M5.config();
   cfg.internal_mic = false;
+  cfg.internal_imu = !ownImu;
   M5.begin(cfg);
+  uint32_t tBegin = millis();
   setenv("TZ", TZ_INFO, 1);  // TZ ueberlebt den Deep Sleep nicht
   tzset();
   ui::begin();
+  uint32_t tUi = millis();
 
-  bool cold = (g.magic != kMagic);
   if (cold) {
     memset(&g, 0, sizeof g);
     g.magic = kMagic;
     g.face = kUnknown;
     clearTotals(g.today);
   }
-  if (!hal::begin()) ui::showText("Hardwarefehler", "PM1/IMU pruefen");
+  if (!hal::begin(ownImu)) ui::showText("Hardwarefehler", "PM1/IMU pruefen");
+  uint32_t tHal = millis();
   store::begin();
   if (!store::loadModel(model)) model = defaultModel();
   tracker.restore(g.face);
-  log_i("Start: kalt=%d Weckgrund=%d Seite=%d Modell=%d Akku=%d mV Bauform=%s/%d", cold,
-        (int)hal::wakeCause(), g.face, model.valid, hal::batteryMv(), kCoin ? "Muenze" : "Prisma", kFaces);
+  uint32_t tStore = millis();
+  log_i("Start: kalt=%d Weckgrund=%d Seite=%d Modell=%d Akku=%d mV Bauform=%s/%d | Boot ms: setup@%u begin=%u ui=%u hal=%u store=%u imu=%s",
+        cold, (int)hal::wakeCause(), g.face, model.valid, hal::batteryMv(), kCoin ? "Muenze" : "Prisma", kFaces,
+        (unsigned)tSetup, (unsigned)(tBegin - tSetup), (unsigned)(tUi - tBegin), (unsigned)(tHal - tUi),
+        (unsigned)(tStore - tHal), ownImu ? "eigen" : "M5");
 
   if (cold) {
     ui::showText("Zeitprisma", "hole Uhrzeit ...");
