@@ -341,9 +341,11 @@ int batteryMv() {
 
 esp_sleep_wakeup_cause_t wakeCause() { return esp_sleep_get_wakeup_cause(); }
 
+// Ein kurzer Klick ist beim Boot (ca. 0,6 s nach dem Wecken) schon wieder losgelassen: das Wecken per EXT1/GPIO
+// reicht. Zusaetzlich zaehlt eine noch gehaltene Taste (z. B. wenn Bewegung und Taste zusammen geweckt haben).
 bool wokeByButton() {
   auto c = wakeCause();
-  return (c == ESP_SLEEP_WAKEUP_EXT1 || c == ESP_SLEEP_WAKEUP_GPIO) && digitalRead(PIN_BTN_A) == LOW;
+  return c == ESP_SLEEP_WAKEUP_EXT1 || c == ESP_SLEEP_WAKEUP_GPIO || digitalRead(PIN_BTN_A) == LOW;
 }
 
 void logWakeDiag() {

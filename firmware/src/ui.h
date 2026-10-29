@@ -11,8 +11,11 @@ void off();
 void setRotation(uint8_t rot);
 void beep(int count, int freq = 2600, int ms = 70);
 void longBeep();
-// Projektnummer als Tonfolge: je 5 ein langer Ton, Rest kurz (7 = lang + 2 kurz, 12 = 2 lang + 2 kurz)
-void beepProject(int project);
+// Projekt-Ton: ein weicher Einzelton je Projekt (PROJECT_TONES_HZ in config.h, 0 = Pause). startProjectTone() kehrt
+// sofort zurueck (der Ton laeuft im Hintergrund), waitTone() wartet auf das Ende (vor dem Schlafen aufrufen).
+void startProjectTone(int project);
+void waitTone();
+void beepProject(int project);  // = startProjectTone() + waitTone()
 
 // Bestaetigung nach Seitenwechsel (Projektname in Projektfarbe)
 void showProject(int project, const char* name, uint8_t rot);

@@ -51,6 +51,29 @@ static const uint16_t PROJECT_COLORS[] = {
 #define DISP_ROT_OFFSET  0
 #define DISP_ROT_DIR     1
 
+// Anzeigedauer: so lange zeigt der Stick etwas und bleibt wach (ein neuer Wechsel startet die Zeit neu)
+#define PROJECT_SHOW_MS  5000    // Projektfarbe und Name nach einem Wechsel
+#define STATUS_SHOW_MS   8000    // Tagesuebersicht (Seite 0, Taste A)
+
+// Ton je Projekt in Hz (Index = Projekt, 0 = Pause): C-Dur-Pentatonik, aufsteigend. Jedes Projekt hat einen eigenen
+// weichen Einzelton (Sinus mit leiser Oktave und Abklingen, ui.cpp); die Pause ist die tiefste Note.
+// Ab Index 9 nur fuer die 12-Eck-Muenze und das Prisma (9 Projekte).
+static const uint16_t PROJECT_TONES_HZ[] = {
+    392,   // Pause  G4
+    523,   // 1      C5
+    587,   // 2      D5
+    659,   // 3      E5
+    784,   // 4      G5
+    880,   // 5      A5
+    1047,  // 6      C6
+    1175,  // 7      D6
+    1319,  // 8      E6
+    1568,  // 9      G6
+    1760,  // 10     A6
+    2093,  // 11     C7
+    2349,  // 12     D7
+};
+
 // ---------------------------------------------------------------- WLAN / Zeit
 // Zugangsdaten NIE hier eintragen (diese Datei ist in git, das Repo oeffentlich):
 // sie stehen in config_local.h (steht in .gitignore, Vorlage: config_local.h.example).

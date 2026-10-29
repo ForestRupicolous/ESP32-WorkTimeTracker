@@ -34,6 +34,7 @@ RTC_DATA_ATTR static Persist g;
 static constexpr uint32_t kMagic = 0x5A500300u | kFaces;  // Version 3 + Bauform
 static_assert(sizeof(PROJECT_NAMES) / sizeof(PROJECT_NAMES[0]) == kFaces, "PROJECT_NAMES passt nicht zur Bauform");
 static_assert(sizeof(PROJECT_COLORS) / sizeof(PROJECT_COLORS[0]) >= kFaces, "zu wenige PROJECT_COLORS");
+static_assert(sizeof(PROJECT_TONES_HZ) / sizeof(PROJECT_TONES_HZ[0]) >= kFaces, "zu wenige PROJECT_TONES_HZ");
 static constexpr time_t kEpochSane = 1704067200;  // 2024-01-01
 
 static FaceModel model;
@@ -60,7 +61,7 @@ static void maybeSync(bool force) {
   }
 }
 
-static void showStatusNow(uint32_t ms = 8000) {
+static void showStatusNow(uint32_t ms = STATUS_SHOW_MS) {
   ui::showStatus(g.today, projectForFace(g.face), g.since, nowT(), g.timeValid, hal::batteryMv());
   uiUntil = millis() + ms;
 }
@@ -76,16 +77,17 @@ static void commit(int face, const Vec3& accel) {
     log_e("Log schreiben fehlgeschlagen");
   log_i("Seite %d -> %s", face, PROJECT_NAMES[p]);
 
-  ui::beepProject(p);
+  ui::startProjectTone(p);  // der Ton laeuft im Hintergrund, waehrend die Anzeige aufgebaut wird
   if (face == 0) {
     showStatusNow();
   } else if (displayVisible(face)) {  // sonst zeigt das Display Richtung Tisch
     ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel));
-    uiUntil = millis() + 2500;
+    uiUntil = millis() + PROJECT_SHOW_MS;
   }
   bool wasValid = g.timeValid;
   maybeSync(false);
   if (!wasValid && g.timeValid) g.since = nowT();  // erst ab jetzt sinnvoll zaehlbar
+  ui::waitTone();  // nicht mitten im Ton schlafen gehen
 }
 
 // ---------------------------------------------------------------- Teach-in
@@ -102,6 +104,7 @@ static void teachIn() {
     if (hal::readAccel(a)) sd.add(a);
     if (sd.still() && t.offer(sd.mean())) {
       int k = t.captured();
+      log_i("Teach-in: Seite %d erfasst", k - 1);
       ui::beepProject(k - 1);
       ui::setRotation(rotationFor(k - 1, sd.mean()));
       char l2[32], l3[40];
@@ -115,6 +118,7 @@ static void teachIn() {
     delay(SAMPLE_MS);
   }
   if (!t.done()) {
+    log_w("Teach-in: abgebrochen (Zeit), %d von %d Seiten erfasst", t.captured(), kFaces);
     ui::showText("Teach-in", "abgebrochen (Zeit)");
     ui::beep(3, 800, 150);
     delay(2500);
@@ -122,6 +126,8 @@ static void teachIn() {
   }
   float worst = 0;
   bool ok = t.plausible(8.f, &worst);
+  log_i("Teach-in: alle %d Seiten erfasst, Abweichung max %.1f Grad -> %s", kFaces, worst,
+        ok ? "Modell gespeichert" : "verworfen (Reihenfolge falsch?)");
   char l3[40];
   snprintf(l3, sizeof l3, "Abweichung max %.0f Grad", worst);
   if (!ok) {

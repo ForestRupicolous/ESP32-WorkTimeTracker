@@ -32,10 +32,43 @@ void beep(int count, int freq, int ms) {
 
 void longBeep() { beep(1, 1800, 350); }
 
+// Weicher Einzelton: Sinus plus leise Oktave, kurzer Anschwung, Abklingen. M5.Speaker.tone() liefert nur Rechteck.
+// Der Puffer bleibt bis zum Ende der Wiedergabe in Benutzung: waitTone() bzw. der naechste Ton wartet darauf.
+static constexpr uint32_t kToneRate = 22050;  // Abtastrate des StickS3-Lautsprechers (M5Unified-Vorgabe)
+static constexpr uint32_t kToneMs = 300;
+static constexpr size_t kToneLen = kToneRate * kToneMs / 1000;
+static int16_t toneBuf[kToneLen];
+
+void waitTone() {
+  while (M5.Speaker.isPlaying()) delay(2);
+}
+
+static void softTone(float hz) {
+  if (!M5.Speaker.isRunning()) M5.Speaker.begin();
+  waitTone();
+  const float w = 2.0f * (float)M_PI * hz / (float)kToneRate;
+  for (size_t i = 0; i < kToneLen; ++i) {
+    float t = (float)i / (float)kToneRate;
+    float env = expf(-t / 0.11f);
+    if (t < 0.008f) env *= t / 0.008f;                                // Anschwung 8 ms
+    float tail = (float)(kToneLen - 1 - i) / (float)kToneRate;
+    if (tail < 0.02f) env *= tail / 0.02f;                            // Ausblenden 20 ms
+    float s = sinf(w * (float)i) + 0.25f * sinf(2.0f * w * (float)i) * expf(-t / 0.05f);
+    toneBuf[i] = (int16_t)(s * env * 23000.0f);
+  }
+  M5.Speaker.playRaw(toneBuf, kToneLen, kToneRate, false, 1, -1, false);
+}
+
+void startProjectTone(int project) {
+  const int n = (int)(sizeof(PROJECT_TONES_HZ) / sizeof(PROJECT_TONES_HZ[0]));
+  if (project < 0) project = 0;
+  if (project >= n) project = n - 1;
+  softTone((float)PROJECT_TONES_HZ[project]);
+}
+
 void beepProject(int project) {
-  if (project <= 0) { beep(1, 1500, 140); return; }
-  while (project >= 5) { beep(1, 2200, 300); project -= 5; }
-  if (project > 0) beep(project);
+  startProjectTone(project);
+  waitTone();
 }
 
 void showProject(int project, const char* name, uint8_t rot) {
