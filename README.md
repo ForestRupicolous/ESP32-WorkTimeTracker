@@ -139,16 +139,16 @@ Stand 29.10.2026, Einschränkungen zuerst.
 
 | Bereich | Stand |
 |---|---|
-| Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s, Projektnamen aus `config_local.h`, Übertragszeile um Mitternacht, Anzeige-Drehung, Stromverbrauch und Laufzeit | **nicht geprüft** |
+| Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s, Darstellung eigener Projektnamen am Display, Übertragszeile um Mitternacht, Anzeige-Drehung, Stromverbrauch und Laufzeit | **nicht geprüft** |
 | Gehäuse (gedruckt) | funktioniert laut Nutzer (ohne Log, ohne Einzelheiten) |
 | Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz | vom Nutzer am Gerät bestätigt (ohne Log) |
 | Teach-in (ohne Gehäuse) | lief am Gerät durch (9 Seiten, Abweichung max 6,0°) |
 | WLAN-Export (Taste A 2 s), Tagesdateien, Gesamtdatei | am Gerät abgerufen und geprüft |
-| Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand (ohne Gehäuse) | am Gerät im Log gemessen |
+| Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand (ohne Gehäuse), eigene Projektnamen aus `config_local.h` im Log | am Gerät im Log gemessen |
 
 **Nicht am Gerät geprüft:**
 - Teach-in im Gehäuse (der Nutzer meldet das Gehäuse insgesamt als funktionierend, das Teach-in darin nicht gesondert) und Taste A 6 s halten (Teach-in per Taste).
-- Projektnamen aus `config_local.h` (am Gerät liefen die Standardnamen).
+- Darstellung der eigenen Projektnamen auf dem Display (im Log stehen sie; die Übersicht kürzt Namen auf 7 Zeichen).
 - Übertragszeile um Mitternacht (kein Mitternachtsübergang gesehen) und Anlegen einer neuen Tagesdatei mit der `size()`-Prüfung (erst beim ersten Wechsel eines neuen Tages).
 - Stromverbrauch und Laufzeit, Anzeige-Drehung des aufgestellten Textes (Kalibrierung `DISP_ROT_OFFSET/DIR`), schnelles Rollen mit der kurzen Entprellung.
 - Zeiten für Schütteln und Wecken per Taste (nicht gemessen).
@@ -159,6 +159,7 @@ Stand 29.10.2026, Einschränkungen zuerst.
 - **Start:** Die Firmware (`muenze8`) startet: Startzeile im Log, M5PM1 (Akkuspannung gelesen) und BMI270 ohne Fehlermeldung initialisiert, WLAN offenbar verbunden.
 - **Seitenerkennung:** 200-s-Mitschnitt mit 26 Seitenwechseln (alle 8 Randseiten und Pause), **kein einziger „unbekannt“**, kein Wechsel im selben Wachabschnitt unter 1,4 s Abstand (das ist das Rolltempo), Startzeile 0,57 s nach dem Chip-Start, erste Seite 1,0 bis 1,3 s nach dem Chip-Start.
 - **Wecken per Bewegung:** Bewegung weckt den Stick (4 und 8 Mal in zwei 200-s-Mitschnitten), unberührt schläft er ohne Aufwachen (84 s, 35 s und 55 s am Stück gemessen), es gibt keine Wecken-Schleife (Hintergrund: Diagnose der Weckkette).
+- **Projektnamen:** Die eigenen Namen aus `config_local.h` stehen im Log (`Seite n -> Name`, alle 9 Seiten der Münze 8 gesehen).
 - **Teach-in** (ohne Gehäuse): lief durch (9 Seiten, Abweichung max 6,0°), die erste Tagesdatei wurde angelegt.
 - **WLAN-Export:** Taste A 2 s halten startet ihn, der Stick ist danach per WLAN erreichbar. Abgerufen und geprüft: Startseite, Tagesdatei und Alt-Datei einzeln, Gesamtdatei auch per HTTP/1.1 (siehe Log-Datei).
 
@@ -287,7 +288,7 @@ Eigene Ausgaben der Firmware:
 `POWER_DEEPSLEEP 1`: Bewegung weckt den ESP32 über BMI270 any-motion → M5PM1 PYG4 → IRQ PYG1 → G13. Danach wird abgetastet, geloggt und wieder geschlafen. M5 gibt für diesen Board-Zustand (L2) ca. 102 µA an. Rechnerisch reicht das für einige Wochen pro Ladung, real bitte messen: `vbat_mv` wird mitgeloggt. Dauerwackeln (Tasche) → 5 min Timer-Schlaf. Rückfall `POWER_DEEPSLEEP 0`: Light Sleep mit Abfrage, einfacher, aber spürbar mehr Verbrauch.
 
 ### Offene Punkte (ungetestet)
-- **Am Gerät nicht getestet:** Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s halten (Teach-in per Taste), Übertragszeile um Mitternacht und Anlegen einer neuen Tagesdatei (Inhalt der Tagesdatei und Export sind am Gerät geprüft), Projektnamen aus `config_local.h`, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz und der WLAN-Export (siehe Stand der Prüfung).
+- **Am Gerät nicht getestet:** Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s halten (Teach-in per Taste), Übertragszeile um Mitternacht und Anlegen einer neuen Tagesdatei (Inhalt der Tagesdatei und Export sind am Gerät geprüft), Darstellung eigener Projektnamen am Display, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz und der WLAN-Export (siehe Stand der Prüfung).
 - **Bootzeit, Rest (nicht untersucht):** Nach dem Schnellstart bleiben 0,57 s bis zur Startzeile: `setup@64`, `begin` 434 ms (`M5.begin()` ohne IMU: Display- und Power-Initialisierung, nicht aufgeschlüsselt), `hal` 72 ms. Ob sich die Display-Initialisierung beim Wecken per Bewegung sparen lässt (das Display bleibt dort ohnehin aus), ist offen.
 - **Wecken per Bewegung:** Nicht untersucht: wie viele Wecken ein Dauerrollen auslöst und wie sich Bewegung in einer Tasche verhält (45-s-Sitzungsgrenze, dann 5 min Schlaf).
 - **Weckkette, Empfindlichkeit:** Die any-motion-Konfiguration ist am Gerät zurückgelesen und stimmt (Dauer 5, Schwelle 0xAA ca. 80 mg, alle Achsen, nur INT1), und echte Bewegung weckt. Ob die Schwelle für sanftes Drehen der Münze reicht und ob Tischerschütterungen ungewollt wecken, ist nach Gefühl im Alltag abzustimmen (`ANYMOT_THRESHOLD`, `ANYMOT_DURATION`).
