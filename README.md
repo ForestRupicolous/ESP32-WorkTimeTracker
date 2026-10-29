@@ -3,7 +3,7 @@
 Projektzeit-Tracker im Stil von TimeFlip mit M5Stack StickS3, Fortsetzung des Projekts „M5StickC S3 Projektzeitschreiber“.
 Entwicklung (Hardware-Fakten mit Quellen, Befehle, Konventionen, nächste Schritte): siehe `CLAUDE.md`.
 
-> **Stand, Einschränkungen zuerst:** Die Firmware (`muenze8`) ist am 29.10.2026 auf einen StickS3 geflasht worden (esptool, Hashes verifiziert). Ob die App danach startet und funktioniert, ist **noch nicht bestätigt**. Gehäuse nicht gedruckt.
+> **Stand, Einschränkungen zuerst:** Die Firmware (`muenze8`) ist am 29.10.2026 auf einen StickS3 geflasht worden (esptool, Hashes verifiziert) und **startet**: Die Startzeile wurde mitgeschnitten, M5PM1 (Akku 4170 mV gelesen) und BMI270 sind ohne Fehlermeldung initialisiert, das WLAN hat sich offenbar verbunden. Teach-in, Seitenerkennung, Wecken per Bewegung, Tasten, Töne und Stromverbrauch sind **nicht getestet**. Gehäuse nicht gedruckt.
 > Am PC geprüft (29.10.2026): Kernlogik in Host-Tests (Münze 8 = 130, Münze 12 = 188, Prisma 10 = 140 Prüfungen), Gehäuse-Passung gegen das M5-Strukturmodell (rechnerisch) und dass alle drei Firmware-Varianten mit der ESP32-S3-Toolchain kompilieren (`make build`). „Kompiliert“ heißt nicht „läuft“.
 
 **Standard: 8-Eck-Münze**, 53,8 mm Schlüsselweite (ca. 57,6 mm über die gefasten Ecken) × 22 mm.
@@ -57,11 +57,13 @@ Makefile    make test | build | flash | log | ref | gehaeuse
 - **Wenn kein Port erscheint oder der Stick im Sekundentakt neu startet:** Download-Modus erzwingen. Am 29.10.2026 trat das Neustart-Verhalten auf (im Kernel-Log ständig neue USB-Gerätenummern, Ursache ungeklärt). Laut M5-Doku: USB-Kabel anschließen und die **seitliche Reset-Taste gedrückt halten, bis die interne grüne LED blinkt** (eine Haltedauer nennt die Doku nicht). Danach bleibt `303a:1001` (`lsusb`) dauerhaft stehen, ohne neue Gerätenummern. So hat es hier funktioniert.
 - **Prüfen, ohne den Download-Modus zu verlassen:** `esptool.py --chip esp32s3 --port /dev/ttyACM0 --after no_reset flash_id`. Erwartet: ESP32-S3-PICO-1, 8 MB Flash, 8 MB PSRAM, am Ende „Staying in bootloader.“
 - **Bootloader oder laufende App?** `esptool.py ... --before no_reset --after no_reset chip_id`: Antwortet der Chip (MAC wird gezeigt), steht er im Bootloader. Die laufende App antwortet nicht.
-- **Nach dem Flashen:** Am 29.10.2026 blieb der Stick trotz „Hard resetting via RTS pin“ im Bootloader (esptool antwortete danach ohne Reset). Vermutung: Der Download-Modus ist an der Reset-Taste/dem M5PM1 verriegelt. Dann die Seitentaste **einmal kurz klicken** (M5-Doku: Einfachklick = Einschalten/Reset, Doppelklick = Ausschalten). *Bestätigung am Gerät steht noch aus.*
+- **Nach dem Flashen die App starten:** Der „Hard resetting via RTS pin“ von esptool lässt den Stick hier im Download-Modus stehen. Am 29.10.2026 gemessen: Nach einem RTS-Reset meldet das ROM `rst:0x15 (USB_UART_CHIP_RESET),boot:0x21 (DOWNLOAD(USB/UART0))` und „waiting for download“, die App startet nicht. **Ein Watchdog-Reset startet die App:** `esptool.py --chip esp32s3 --port /dev/ttyACM0 --before default_reset --after watchdog_reset chip_id` (esptool liegt unter `~/.platformio/packages/tool-esptoolpy/`; der USB-Port meldet sich dabei neu an, die Port-Nummer kann sich ändern). Damit wurde die Startzeile gesehen. Ein Klick auf die Seitentaste wurde nicht gezielt getestet (M5-Doku: Einfachklick = Einschalten/Reset, Doppelklick = Ausschalten).
+- **ModemManager (Linux):** Er hielt am 29.10.2026 den Port des Sticks offen (`fuser`), und der Port wanderte von `ttyACM0` auf `ttyACM1`. ModemManager ist ein bekannter Störer bei ESP32-Geräten mit USB (öffnet Ports, setzt DTR/RTS, schickt AT-Befehle). PlatformIO meldet beim Upload außerdem, dass `/etc/udev/rules.d/99-platformio-udev.rules` veraltet ist. Vermutlich hilft es, die Regeln zu erneuern: `curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules | sudo tee /etc/udev/rules.d/99-platformio-udev.rules`, danach `sudo udevadm control --reload-rules && sudo udevadm trigger` und den Stick neu anstecken (Befehle laut PlatformIO-Doku). Ob das die Neustart-Schleife und den hängenden Download-Modus behebt, ist **ungeprüft**.
 - **Mitlesen:** `make log` (= `tools/seriallog.py -s 30`, braucht pyserial, z. B. mit dem Python von PlatformIO: `~/.platformio/penv/bin/python tools/seriallog.py -s 30`). Die Startzeile erscheint rund 1 s nach dem Reset, meist bevor der Rechner den Port geöffnet hat. Deshalb den Logger **vor** dem Reset starten.
 - **Deep Sleep:** Im Deep Sleep verschwindet der USB-Port (laut `seriallog.py`), zum Flashen den Stick bewegen oder Taste A drücken. Bei eingebautem Stick gibt es keinen Zugang zur Seitentaste.
 
 ## Funktionsweise (aus dem Code, Stand 29.10.2026; Konstanten in `firmware/include/config.h`)
+Alles hier ist aus dem Code gelesen. Am Gerät bestätigt ist nur der Start (siehe Stand oben).
 
 ### Gespeicherter Zustand
 - **RTC-RAM** (überlebt Deep Sleep, nicht Stromverlust, Flashen oder Bauform-Wechsel): aktive Seite, Beginn des Abschnitts, Tagessummen je Projekt, Zeitpunkt des letzten NTP-Syncs, „Zeit gültig“, Zähler unruhiger Sitzungen. Prüfwert `0x5A500300 | Seitenzahl`. Stimmt er nicht, ist es ein **Kaltstart**.
@@ -113,14 +115,17 @@ Eigene Ausgaben der Firmware:
 - `Start: kalt=<1|0> Weckgrund=<n> Seite=<Seite> Modell=<1|0> Akku=<mV> mV Bauform=Muenze/9`. **Weckgrund** (ESP-IDF): 0 = kein Aufwachen aus Deep Sleep (Einschalten, Reset, Flashen), 2 = Bewegung (G13), 3 = Taste A, 4 = Timer. `Seite` −1 = Pause oder unbekannt. `Muenze/9` = Münze mit 8 Randseiten plus Seite 0, beim Prisma `Prisma/10`.
 - `Seite <n> -> <Projektname>` bei jedem übernommenen Wechsel.
 - Warnungen und Fehler: `LittleFS leer/defekt -> formatiere`, `WLAN nicht erreichbar`, `Log schreiben fehlgeschlagen`, `M5PM1 nicht erreichbar`, `BMI270 nicht gefunden`, `Bewegungs-Wecken nicht verfuegbar, Timer-Rueckfall 60 s`.
-- Im Teach-in und beim Warten wird nichts ausgegeben. Die WLAN-Zugangsdaten gibt die Firmware nirgends aus. Ob Bibliotheken des Arduino-Cores zusätzlich eigene Zeilen schreiben, ist ungeprüft.
+- Im Teach-in und beim Warten wird nichts ausgegeben. Die WLAN-Zugangsdaten gibt die Firmware nirgends aus.
+- Zeilenformat: `[ms seit Start][Level][Datei:Zeile] Funktion(): Text`. Am Gerät gesehen (29.10.2026, nach Watchdog-Reset): dreimal `i2cInit(): Initialising I2C Master: sda=47 scl=48 freq=100000` (Arduino-Core), dann `setup(): Start: kalt=1 Weckgrund=0 Seite=-1 Modell=0 Akku=4170 mV Bauform=Muenze/9`, nach rund 6 s `WiFiGeneric.cpp ... Reason: 8 - ASSOC_LEAVE` (der Core meldet das eigene Abmelden nach dem NTP-Sync, kein Fehler). Fehlt „WLAN nicht erreichbar“, hat sich das WLAN verbunden. Ob NTP die Uhrzeit geliefert hat, steht nicht im Log (das Display zeigt „Heute …“ oder „Zeit unbekannt“).
+- Nach dem Flashen und nach einem Watchdog-Reset ist `kalt=1` und `Modell=0`, es folgt also das Teach-in.
 
 ## Fehlersuche
 
 | Beobachtung | Bedeutung und Maßnahme |
 |---|---|
 | Stick taucht alle 1–2 s am USB auf und verschwindet | Neustart- oder Wecken-Schleife, Ursache offen. Download-Modus erzwingen und neu flashen. |
-| Nach dem Flashen bleibt der Port stabil, aber es kommt kein Log und das Display tut nichts | Stick steht noch im Download-Modus. Seitentaste einmal klicken. Kontrolle: `esptool ... --before no_reset chip_id` antwortet danach nicht mehr. |
+| Nach dem Flashen bleibt der Port stabil, aber es kommt kein Log und das Display tut nichts | Stick steht noch im Download-Modus (ROM meldet `boot:0x21`). Watchdog-Reset auslösen (siehe Flashen). Kontrolle: `esptool ... --before no_reset chip_id` antwortet danach nicht mehr. |
+| Port wechselt von `ttyACM0` auf `ttyACM1`, esptool meldet „Write timeout“ oder „port busy“ | Ein anderer Prozess hält den alten Port offen, meist ModemManager (`fuser -v /dev/ttyACM*`). Siehe ModemManager im Abschnitt Flashen. „Write timeout“ ohne Bootloader deutet darauf hin, dass die App läuft und nichts liest (so einmal beobachtet). |
 | Display „Zeit unbekannt“ | WLAN oder NTP fehlgeschlagen. `config_local.h` prüfen (SSID, Passwort, nur 2,4-GHz-Netz), seriell „WLAN nicht erreichbar“. |
 | „Hardwarefehler / PM1/IMU pruefen“ | M5PM1 oder BMI270 nicht per I2C erreichbar. I2C nur über `M5.In_I2C` nutzen. |
 | Teach-in „abgebrochen (Zeit)“ oder „Reihenfolge falsch?“ | Siehe Teach-in. Taste A 6 s halten startet es neu. |
@@ -131,7 +136,8 @@ Eigene Ausgaben der Firmware:
 `POWER_DEEPSLEEP 1`: Bewegung weckt den ESP32 über BMI270 any-motion → M5PM1 PYG4 → IRQ PYG1 → G13. Danach wird abgetastet, geloggt und wieder geschlafen. M5 gibt für diesen Board-Zustand (L2) ca. 102 µA an. Rechnerisch reicht das für einige Wochen pro Ladung, real bitte messen: `vbat_mv` wird mitgeloggt. Dauerwackeln (Tasche) → 5 min Timer-Schlaf. Rückfall `POWER_DEEPSLEEP 0`: Light Sleep mit Abfrage, einfacher, aber spürbar mehr Verbrauch.
 
 ## Offene Punkte (ungetestet)
-- **App-Start:** Ob die geflashte Firmware auf dem Stick anläuft, ist nicht bestätigt (siehe Flashen).
+- **Am Gerät nicht getestet:** Teach-in, Seitenerkennung, Wecken per Bewegung, Tasten, Töne, Anzeige, Stromverbrauch. Bestätigt ist nur der Start (siehe Stand).
+- **Neustart-Schleife vor dem Flashen:** Der Stick tauchte im Sekundentakt am USB auf und verschwand wieder. Ursache ungeklärt, Verdacht ModemManager und veraltete udev-Regeln (siehe Flashen).
 - **Weckkette:** Die BMI270-any-motion-Register sind aus der Bosch-SensorAPI übernommen, die M5PM1-Konfiguration aus der M5-Doku. Beides muss auf der Hardware verifiziert werden.
 - **Magnet-Halt:** Annahme „Magnetic back“ hält an Stahl. Der Stick sitzt nur magnetisch in der offenen Tasche, falls zu schwach: dünnes doppelseitiges Klebeband.
 - **Display-Rotation:** `DISP_ROT_OFFSET/DIR` in `config.h` einmal am Gerät kalibrieren.
