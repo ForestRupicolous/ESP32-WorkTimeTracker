@@ -1,7 +1,13 @@
 // Zeitprisma – hardwareunabhaengige Logik (auf dem PC testbar, siehe test/host)
 //  - Seitenerkennung aus dem Beschleunigungsvektor
 //  - Ruheerkennung und Entprellen (Seite muss SETTLE_MS stabil liegen)
-//  - Teach-in der sechs Seitenvektoren
+//  - Teach-in der Seitenvektoren
+//
+// Bauform per Build-Flag:
+//   (Standard)          Muenze mit PRISMA_RING Randseiten (Standard 8): Seite 0 = Ruecken unten
+//                       (Display oben) = Pause, Randseiten 1..N, aktiv ist die OBEN liegende
+//   -DPRISMA_RING=12    Muenze mit 12 Randseiten
+//   -DPRISMA_PRISMA10   Zehnkant-Prisma: Seite 0 (Display) = Pause, 1..9 = Projekte
 //  - Tagessummen mit Mitternachts-Split
 //  - CSV-Zeile
 #pragma once
@@ -11,8 +17,23 @@
 
 namespace prisma {
 
-constexpr int kFaces   = 6;   // Seite 0 = Display, 1..5 = Projekte
-constexpr int kUnknown = -1;  // keine Seite oben (z. B. aufrecht stehend) -> Pause
+#if defined(PRISMA_PRISMA10)
+constexpr bool kCoin   = false;
+constexpr int  kRing   = 10;          // Seiten im Ring (inkl. Seite 0)
+constexpr int  kFaces  = 10;          // Seite 0 = Display, 1..9 = Projekte
+constexpr int  kRingFirst = 0;        // Seite 0 liegt im Ring
+#else
+#ifndef PRISMA_RING
+#define PRISMA_RING 8
+#endif
+constexpr bool kCoin   = true;
+constexpr int  kRing   = PRISMA_RING; // Randseiten 1..N
+constexpr int  kFaces  = kRing + 1;   // + Seite 0 = Ruecken unten (Display oben)
+constexpr int  kRingFirst = 1;
+static_assert(kRing >= 6 && kRing <= 12, "PRISMA_RING 6..12");
+#endif
+constexpr float kStepDeg = 360.0f / kRing;  // Winkel zwischen Nachbarseiten im Ring
+constexpr int kUnknown = -1;  // keine Seite erkannt (Prisma aufrecht, Muenze Display unten) -> Pause
 
 struct Vec3 { float x, y, z; };
 
@@ -27,8 +48,9 @@ struct FaceModel {
   bool valid;
 };
 
-// Annahme ohne Teach-in: Laengsachse = +Y, Display (Seite 0) = +Z,
-// Seiten im Uhrzeigersinn um +Y. Nur Notloesung – Teach-in ist Pflicht.
+// Annahme ohne Teach-in (nur Notloesung, Teach-in ist Pflicht):
+//  Prisma: Laengsachse = +Y, Display (Seite 0) = +Z, Seiten im Uhrzeigersinn um +Y
+//  Muenze: Seite 0 = +Z, Randseite k oben = Richtung 90-kStepDeg*k Grad in der XY-Ebene
 FaceModel defaultModel();
 
 // Seite, deren Vektor maximal matchDeg vom Messwert abweicht, sonst kUnknown.
@@ -36,6 +58,13 @@ int classify(const FaceModel& m, const Vec3& accel, float matchDeg, float* bestD
 
 // Seite 0 (Display oben) und unbekannt -> Projekt 0 = Pause, Seite k -> Projekt k
 inline int projectForFace(int face) { return (face <= 0) ? 0 : face; }
+
+// Zeigt das Display nach oben/seitlich (lohnt sich eine Anzeige), wenn 'face' oben liegt?
+bool displayVisible(int face);
+
+// Muenze aufgestellt: in welche Richtung der Displayebene zeigt "oben"?
+// 0 = +Y, 1 = +X, 2 = -Y, 3 = -X (Sensorachsen wie M5Unified liefert), naechster 90-Grad-Schritt.
+int upQuadrant(const Vec3& accel);
 
 // ---------------------------------------------------------------- Ruhe
 // Gleitendes Fenster: "ruhig", wenn alle Samples im Fenster weniger als maxDevDeg
@@ -73,18 +102,20 @@ class Tracker {
 };
 
 // ---------------------------------------------------------------- Teach-in
-// Seite 0 oben starten, dann der Reihe nach auf 1..5 rollen. Jede neue ruhige
-// Lage, die >= minSepDeg von allen bisherigen entfernt ist, wird die naechste Seite.
+// Seite 0 oben starten, dann der Reihe nach die Seiten 1.. nach oben bringen. Eine neue
+// ruhige Lage wird die naechste Seite, wenn sie >= minSepDeg von allen bisherigen entfernt
+// ist, in der Ringebene liegt und ~kStepDeg (+-40 %) neben der zuletzt erfassten Ringseite.
 class TeachIn {
  public:
-  explicit TeachIn(float minSepDeg = 40.0f) : minSep_(minSepDeg), n_(0) {}
+  explicit TeachIn(float minSepDeg = 0.65f * kStepDeg) : minSep_(minSepDeg), n_(0) {}
   void start() { n_ = 0; }
   // true, wenn die Lage als neue Seite uebernommen wurde
   bool offer(const Vec3& stillMean);
   int captured() const { return n_; }
   bool done() const { return n_ >= kFaces; }
-  // Plausibilitaet: Nachbarseiten ~60 Grad auseinander (Toleranz tolDeg)
-  bool plausible(float tolDeg = 15.0f, float* worstDeg = nullptr) const;
+  // Plausibilitaet: Nachbarseiten im Ring ~kStepDeg auseinander (Toleranz tolDeg);
+  // Muenze zusaetzlich: Randseiten ~90 Grad zu Seite 0
+  bool plausible(float tolDeg = 8.0f, float* worstDeg = nullptr) const;
   FaceModel result() const;
  private:
   float minSep_;
@@ -96,7 +127,7 @@ class TeachIn {
 struct DayTotals {
   int16_t year;   // tm_year
   int16_t yday;   // tm_yday
-  uint32_t sec[kFaces];  // je Projekt 0..5
+  uint32_t sec[kFaces];  // je Projekt 0..kFaces-1
 };
 
 void clearTotals(DayTotals& d);

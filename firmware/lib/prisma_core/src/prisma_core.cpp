@@ -26,9 +26,17 @@ float angleDeg(const Vec3& a, const Vec3& b) {
 
 FaceModel defaultModel() {
   FaceModel m{};
-  for (int k = 0; k < kFaces; ++k) {
-    float th = (90.f - 60.f * k) / kRad2Deg;  // Normale in XZ, Seite 0 = +Z
-    m.up[k] = {cosf(th), 0.f, sinf(th)};
+  if (kCoin) {
+    m.up[0] = {0.f, 0.f, 1.f};
+    for (int k = 1; k < kFaces; ++k) {
+      float th = (90.f - kStepDeg * k) / kRad2Deg;
+      m.up[k] = {cosf(th), sinf(th), 0.f};
+    }
+  } else {
+    for (int k = 0; k < kFaces; ++k) {
+      float th = (90.f - kStepDeg * k) / kRad2Deg;  // Normale in XZ, Seite 0 = +Z
+      m.up[k] = {cosf(th), 0.f, sinf(th)};
+    }
   }
   m.valid = false;  // nur Annahme
   return m;
@@ -46,6 +54,19 @@ int classify(const FaceModel& m, const Vec3& accel, float matchDeg, float* bestD
   float deg = acosf(bestC) * kRad2Deg;
   if (bestDeg) *bestDeg = deg;
   return (deg <= matchDeg) ? best : kUnknown;
+}
+
+bool displayVisible(int face) {
+  if (face < 0) return false;
+  if (kCoin) return true;  // Ruecken unten: Display oben; aufgestellt: Display senkrecht
+  // Prisma: Display-Normale steht face*kStepDeg von "oben" weg; sichtbar bis knapp ueber waagrecht
+  return cosf(face * kStepDeg / kRad2Deg) > 0.2f;
+}
+
+int upQuadrant(const Vec3& a) {
+  float ang = atan2f(a.x, a.y) * kRad2Deg;  // 0 = +Y, 90 = +X
+  int q = (int)lroundf(ang / 90.f);
+  return ((q % 4) + 4) % 4;
 }
 
 // ---------------------------------------------------------------- StillDetector
@@ -113,13 +134,16 @@ bool TeachIn::offer(const Vec3& stillMean) {
   Vec3 a = normalize(stillMean);
   for (int i = 0; i < n_; ++i)
     if (angleDeg(a, v_[i]) < minSep_) return false;
-  // Ab zwei Seiten ist die Rollachse bekannt: Lagen weit ausserhalb der Rollebene
-  // (z. B. aufrecht hingestellt) sind keine Seite.
-  if (n_ >= 2) {
+  // Reihenfolge: jede weitere Ringseite liegt ~kStepDeg neben der zuletzt erfassten
+  if (n_ > kRingFirst && fabsf(angleDeg(a, v_[n_ - 1]) - kStepDeg) > 0.4f * kStepDeg) return false;
+  // Lagen weit ausserhalb der Ringebene (Prisma aufrecht, Muenze Display unten) sind keine Seite
+  if (kCoin) {
+    if (n_ >= 1 && fabsf(dot(a, v_[0])) > 0.5f) return false;  // > 30 Grad aus der Randebene
+  } else if (n_ >= 2) {
     const Vec3& p = v_[0];
     const Vec3& q = v_[1];
     Vec3 axis = normalize(Vec3{p.y * q.z - p.z * q.y, p.z * q.x - p.x * q.z, p.x * q.y - p.y * q.x});
-    if (fabsf(dot(a, axis)) > 0.5f) return false;  // > 30 Grad aus der Ebene
+    if (fabsf(dot(a, axis)) > 0.5f) return false;
   }
   v_[n_++] = a;
   return true;
@@ -128,9 +152,17 @@ bool TeachIn::offer(const Vec3& stillMean) {
 bool TeachIn::plausible(float tolDeg, float* worstDeg) const {
   if (!done()) return false;
   float worst = 0.f;
-  for (int k = 0; k < kFaces; ++k) {
-    float d = fabsf(angleDeg(v_[k], v_[(k + 1) % kFaces]) - 60.f);
+  for (int i = 0; i < kRing; ++i) {
+    const Vec3& a = v_[kRingFirst + i];
+    const Vec3& b = v_[kRingFirst + (i + 1) % kRing];
+    float d = fabsf(angleDeg(a, b) - kStepDeg);
     if (d > worst) worst = d;
+  }
+  if (kCoin) {
+    for (int k = 1; k < kFaces; ++k) {
+      float d = fabsf(angleDeg(v_[0], v_[k]) - 90.f);
+      if (d > worst) worst = d;
+    }
   }
   if (worstDeg) *worstDeg = worst;
   return worst <= tolDeg;

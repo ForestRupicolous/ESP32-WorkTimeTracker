@@ -1,6 +1,12 @@
 .pio/
+.venv/
 .vscode/
 build/
 *.bin
 __pycache__/
-firmware/test/host/test_core
+firmware/test/host/test_*
+!firmware/test/host/test_core.cpp
+ref/
+*.log
+log*.txt
+CLAUDE.local.md

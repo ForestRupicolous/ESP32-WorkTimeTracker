@@ -7,12 +7,14 @@
 namespace ui {
 
 void begin() {
-  M5.Display.setRotation(1);  // quer, 240 x 135
+  M5.Display.setRotation(DISP_ROT_FLAT);  // quer, 240 x 135
   M5.Display.setBrightness(110);
   M5.Speaker.setVolume(SPEAKER_VOLUME);
 }
 
 void off() { M5.Display.sleep(); }
+
+void setRotation(uint8_t rot) { M5.Display.setRotation(rot & 3); }
 
 static void on() {
   M5.Display.wakeup();
@@ -30,7 +32,14 @@ void beep(int count, int freq, int ms) {
 
 void longBeep() { beep(1, 1800, 350); }
 
-void showProject(int project, const char* name) {
+void beepProject(int project) {
+  if (project <= 0) { beep(1, 1500, 140); return; }
+  while (project >= 5) { beep(1, 2200, 300); project -= 5; }
+  if (project > 0) beep(project);
+}
+
+void showProject(int project, const char* name, uint8_t rot) {
+  setRotation(rot);
   on();
   auto& d = M5.Display;
   d.fillScreen(PROJECT_COLORS[project]);
@@ -46,35 +55,41 @@ void showProject(int project, const char* name) {
 
 void showStatus(const prisma::DayTotals& tot, int currentProject, time_t since, time_t now,
                 bool timeValid, int vbatMv) {
+  setRotation(DISP_ROT_FLAT);
   on();
   auto& d = M5.Display;
   d.fillScreen(TFT_BLACK);
-  d.setTextDatum(textdatum_t::top_left);
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_WHITE);
+  d.setTextDatum(textdatum_t::top_left);
   if (!timeValid) {
-    d.drawString("Zeit unbekannt - WLAN pruefen", 4, 4);
+    d.drawString("Zeit unbekannt", 2, 1);
   } else {
     char h[24];
     struct tm lt;
     localtime_r(&now, &lt);
     strftime(h, sizeof h, "Heute %d.%m. %H:%M", &lt);
-    d.drawString(h, 4, 2);
+    d.drawString(h, 2, 1);
   }
   char b[16], line[40];
-  int y = 22;
-  for (int p = 1; p < prisma::kFaces; ++p) {
+  d.setTextColor(TFT_DARKGREY);
+  d.setTextDatum(textdatum_t::top_right);
+  snprintf(line, sizeof line, "%.2fV", vbatMv / 1000.f);
+  d.drawString(line, d.width() - 2, 1);
+  d.setTextDatum(textdatum_t::top_left);
+  // Projekte in zwei Spalten
+  const int n = prisma::kFaces - 1;
+  const int rows = (n + 1) / 2;
+  const int rowH = (d.height() - 20) / rows > 20 ? 20 : (d.height() - 20) / rows;
+  for (int p = 1; p <= n; ++p) {
     uint32_t s = prisma::isSameDay(tot, now) ? tot.sec[p] : 0;
     if (timeValid && p == currentProject && now > since) s += (uint32_t)(now - since);
     prisma::formatHM(b, sizeof b, s);
     d.setTextColor(PROJECT_COLORS[p]);
-    snprintf(line, sizeof line, "%d %-12.12s %6s", p, PROJECT_NAMES[p], b);
-    d.drawString(line, 4, y);
-    y += 18;
+    snprintf(line, sizeof line, "%2d %-7.7s%5s", p, PROJECT_NAMES[p], b);
+    int col = (p - 1) / rows, row = (p - 1) % rows;
+    d.drawString(line, 2 + col * 120, 20 + row * rowH);
   }
-  d.setTextColor(TFT_DARKGREY);
-  snprintf(line, sizeof line, "Akku %.2f V   A: halten 2s WLAN", vbatMv / 1000.f);
-  d.drawString(line, 4, d.height() - 16);
 }
 
 void showText(const char* l1, const char* l2, const char* l3) {

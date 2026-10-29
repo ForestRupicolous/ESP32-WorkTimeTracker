@@ -6,7 +6,7 @@
 namespace {
 constexpr const char* kLog = "/log.csv";
 constexpr const char* kNs = "prisma";
-constexpr uint32_t kModelVersion = 1;
+constexpr uint32_t kModelVersion = 0x300 | prisma::kFaces;  // Version 3 + Bauform
 }  // namespace
 
 namespace store {
