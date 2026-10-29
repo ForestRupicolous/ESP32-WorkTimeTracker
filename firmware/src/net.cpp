@@ -54,13 +54,14 @@ void serveExport(const std::function<String()>& statusHtml,
 
   WebServer srv(80);
   srv.on("/", HTTP_GET, [&]() { srv.send(200, "text/html; charset=utf-8", statusHtml()); });
-  // Alle Logs hintereinander (eine Kopfzeile): fuer tools/auswertung.py
+  // Alle Logs hintereinander (eine Kopfzeile): fuer tools/auswertung.py. Mit Content-Length statt "chunked": die
+  // Chunked-Antwort kam am Geraet nicht vollstaendig an (HTTP/1.1-Clients bekamen eine fehlerhafte Kodierung).
   srv.on("/log.csv", HTTP_GET, [&]() {
+    srv.setContentLength(store::streamAllSize());
     srv.sendHeader("Content-Disposition", "attachment; filename=zeitprisma.csv");
-    srv.setContentLength(CONTENT_LENGTH_UNKNOWN);
     srv.send(200, "text/csv", "");
-    store::streamAll([&](const uint8_t* d, size_t n) { srv.sendContent((const char*)d, n); });
-    srv.sendContent("");
+    WiFiClient c = srv.client();
+    store::streamAll([&](const uint8_t* d, size_t len) { c.write(d, len); });
   });
   // Ein Tag: /tag?d=JJJJ-MM-TT (auch d=ohne_zeit und d=alt)
   srv.on("/tag", HTTP_GET, [&]() {

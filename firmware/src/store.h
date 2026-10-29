@@ -28,7 +28,9 @@ bool appendEvent(time_t t, bool timeValid, int face, int project, const char* na
 // Logdateien in zeitlicher Reihenfolge: Schluessel "alt" (/log.csv aus frueheren Staenden), "JJJJ-MM-TT", "ohne_zeit"
 void listLogs(const std::function<void(const char* key, size_t size)>& cb);
 size_t logSize();  // Summe aller Logdateien in Bytes
-// Alle Logdateien hintereinander mit einer einzigen Kopfzeile (Export /log.csv)
+// Alle Logdateien hintereinander mit einer einzigen Kopfzeile (Export /log.csv). streamAllSize() liefert die genaue
+// Laenge dafuer (fuer Content-Length, die Chunked-Variante blieb am Geraet haengen).
+size_t streamAllSize();
 void streamAll(const std::function<void(const uint8_t* data, size_t n)>& sink);
 // Pfad zu einem Schluessel (streng geprueft: "alt", "ohne_zeit" oder JJJJ-MM-TT), false bei ungueltigem Argument
 bool pathFromKey(const char* key, char* out, size_t n);

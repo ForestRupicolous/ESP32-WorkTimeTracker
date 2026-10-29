@@ -127,10 +127,28 @@ size_t logSize() {
   return sum;
 }
 
+size_t streamAllSize() {
+  size_t total = strlen(prisma::csvHeader());
+  for (auto& e : collect()) {
+    char path[40];
+    if (!pathFromKey(e.key.c_str(), path, sizeof path)) continue;
+    File f = LittleFS.open(path, FILE_READ);
+    if (!f) continue;
+    size_t hdr = 0;  // Kopfzeile der Datei wird nicht mitgesendet
+    while (f.available()) {
+      ++hdr;
+      if (f.read() == '\n') break;
+    }
+    f.close();
+    total += e.size > hdr ? e.size - hdr : 0;
+  }
+  return total;
+}
+
 void streamAll(const std::function<void(const uint8_t* data, size_t n)>& sink) {
   const char* hdr = prisma::csvHeader();
   sink((const uint8_t*)hdr, strlen(hdr));
-  uint8_t buf[512];
+  uint8_t buf[1024];
   for (auto& e : collect()) {
     char path[40];
     if (!pathFromKey(e.key.c_str(), path, sizeof path)) continue;
