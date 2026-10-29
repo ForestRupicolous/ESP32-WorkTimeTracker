@@ -183,6 +183,62 @@ bool Tracker::update(int face, bool still, uint32_t nowMs) {
   return false;
 }
 
+// ---------------------------------------------------------------- ShakeDetector
+ShakeDetector::ShakeDetector(float jerkG, int peaks, uint32_t windowMs, uint32_t minGapMs, uint32_t maxSampleGapMs)
+    : jerkG_(jerkG),
+      peaks_(peaks < 1 ? 1 : (peaks > kMaxPeaks ? kMaxPeaks : peaks)),
+      windowMs_(windowMs),
+      minGapMs_(minGapMs),
+      maxGapMs_(maxSampleGapMs),
+      prev_{0, 0, 0},
+      prevMs_(0),
+      hasPrev_(false),
+      d1_(0),
+      d2_(0),
+      t1_(0),
+      nd_(0),
+      n_(0) {}
+
+void ShakeDetector::reset() {
+  hasPrev_ = false;
+  nd_ = 0;
+  n_ = 0;
+}
+
+bool ShakeDetector::addPeak(uint32_t tMs) {
+  if (n_ > 0 && (uint32_t)(tMs - peakMs_[n_ - 1]) < minGapMs_) return false;  // Nachschwinger desselben Stosses
+  if (n_ == peaks_) {
+    for (int i = 1; i < n_; ++i) peakMs_[i - 1] = peakMs_[i];
+    --n_;
+  }
+  peakMs_[n_++] = tMs;
+  if (n_ == peaks_ && (uint32_t)(tMs - peakMs_[0]) <= windowMs_) {
+    n_ = 0;
+    return true;
+  }
+  return false;
+}
+
+bool ShakeDetector::add(const Vec3& a, uint32_t nowMs) {
+  bool hit = false;
+  if (hasPrev_ && (uint32_t)(nowMs - prevMs_) <= maxGapMs_) {
+    float dx = a.x - prev_.x, dy = a.y - prev_.y, dz = a.z - prev_.z;
+    float d = sqrtf(dx * dx + dy * dy + dz * dz);
+    // d1_ ist eine Spitze, wenn sie ueber der Schwelle liegt und weder der Vorgaenger noch der Nachfolger groesser ist
+    if (nd_ >= 1 && d1_ > jerkG_ && (nd_ < 2 || d1_ >= d2_) && d1_ > d) hit = addPeak(t1_);
+    d2_ = d1_;
+    d1_ = d;
+    t1_ = nowMs;
+    if (nd_ < 2) ++nd_;
+  } else {
+    nd_ = 0;  // Luecke: Aenderungsfolge neu beginnen
+  }
+  prev_ = a;
+  prevMs_ = nowMs;
+  hasPrev_ = true;
+  return hit;
+}
+
 // ---------------------------------------------------------------- TeachIn
 bool TeachIn::offer(const Vec3& stillMean) {
   if (done()) return false;
@@ -263,6 +319,24 @@ void accrue(DayTotals& d, int project, time_t from, time_t to) {
 void formatHM(char* buf, size_t n, uint32_t seconds) {
   uint32_t m = (seconds + 30) / 60;
   snprintf(buf, n, "%lu:%02lu", (unsigned long)(m / 60), (unsigned long)(m % 60));
+}
+
+void dayLogPath(char* buf, size_t n, time_t t, bool timeValid) {
+  if (!timeValid) {
+    snprintf(buf, n, "/log_ohne_zeit.csv");
+    return;
+  }
+  struct tm lt;
+  localtime_r(&t, &lt);
+  snprintf(buf, n, "/log_%04d-%02d-%02d.csv", lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday);
+}
+
+time_t localMidnight(time_t t) {
+  struct tm lt;
+  localtime_r(&t, &lt);
+  lt.tm_hour = lt.tm_min = lt.tm_sec = 0;
+  lt.tm_isdst = -1;
+  return mktime(&lt);
 }
 
 const char* csvHeader() { return "zeit,epoch,seite,projekt,name,vbat_mv,zeit_ok\n"; }

@@ -364,6 +364,124 @@ static void test_csv() {
   CHECK(strcmp(b, ",12,-1,0,Pause,4100,0\n") == 0);
 }
 
+// ---------------------------------------------------------------- Schuetteln
+// Parameter wie in config.h (SHAKE_JERK_G, SHAKE_PEAKS, SHAKE_WINDOW_MS)
+static ShakeDetector makeShake() { return ShakeDetector(0.25f, 4, 1000); }
+
+// Sinus auf der X-Achse zusaetzlich zur Schwerkraft; liefert den Zeitpunkt (ms) der ersten Erkennung oder -1
+static int feedSine(ShakeDetector& sd, float ampG, float hz, int ms, int* hits = nullptr) {
+  int first = -1, n = 0;
+  for (int t = 0; t < ms; t += 20) {
+    Vec3 a{ampG * sinf(2.0f * 3.14159265f * hz * t / 1000.0f), 0.0f, 1.0f};
+    if (sd.add(a, (uint32_t)t)) {
+      if (first < 0) first = t;
+      ++n;
+    }
+  }
+  if (hits) *hits = n;
+  return first;
+}
+
+// Stoss: Samples mit z = 1 + amp[i], dazwischen ruhig (20 ms Takt ab startMs)
+static bool feedKnocks(ShakeDetector& sd, int knocks, int spacingMs) {
+  bool any = false;
+  uint32_t t = 0;
+  for (int i = 0; i < 20; ++i, t += 20) any |= sd.add({0, 0, 1}, t);  // ruhig
+  for (int k = 0; k < knocks; ++k) {
+    any |= sd.add({0, 0, 3.0f}, t); t += 20;   // Anstoss
+    any |= sd.add({0, 0, 0.2f}, t); t += 20;   // Rueckprall
+    for (int i = 0; i < spacingMs / 20 - 2; ++i, t += 20) any |= sd.add({0, 0, 1}, t);
+  }
+  for (int i = 0; i < 20; ++i, t += 20) any |= sd.add({0, 0, 1}, t);
+  return any;
+}
+
+static void test_shake() {
+  ShakeDetector sd = makeShake();
+  int t = feedSine(sd, 1.0f, 3.0f, 3000);
+  printf("  Schuetteln 1,0 g / 3 Hz erkannt nach %d ms\n", t);
+  CHECK(t >= 0 && t <= 800);
+  sd.reset();
+  t = feedSine(sd, 2.0f, 5.0f, 3000);
+  CHECK(t >= 0 && t <= 600);
+  sd.reset();
+  t = feedSine(sd, 1.5f, 2.0f, 3000);
+  printf("  Schuetteln 1,5 g / 2 Hz erkannt nach %d ms\n", t);
+  CHECK(t >= 0 && t <= 1300);
+  // dauerhaftes Schuetteln loest immer wieder aus (Zaehlung beginnt nach jeder Erkennung neu)
+  sd.reset();
+  int hits = 0;
+  feedSine(sd, 1.5f, 3.0f, 4000, &hits);
+  CHECK(hits >= 3);
+  // sanftes Wackeln bleibt unter der Schwelle
+  sd.reset();
+  CHECK(feedSine(sd, 0.3f, 3.0f, 5000) < 0);
+  sd.reset();
+  CHECK(feedSine(sd, 1.5f, 0.5f, 6000) < 0);  // langsames Hin und Her (0,5 Hz)
+
+  // Rauschen
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> n(-0.02f, 0.02f);
+  sd.reset();
+  bool any = false;
+  for (int k = 0; k < 500; ++k) any |= sd.add({n(rng), n(rng), 1.0f + n(rng)}, (uint32_t)(k * 20));
+  CHECK(!any);
+
+  // Drehen: 90 Grad in 0,5 s, 360 Grad in 1,5 s, schnelles Umdrehen 180 Grad in 0,3 s
+  struct Rot { float deg; int ms; } rots[] = {{90, 500}, {360, 1500}, {180, 300}};
+  for (auto& r : rots) {
+    sd.reset();
+    any = false;
+    for (int t2 = 0; t2 <= r.ms; t2 += 20) {
+      float th = r.deg * (float)t2 / (float)r.ms * (3.14159265f / 180.0f);
+      any |= sd.add({0, sinf(th), cosf(th)}, (uint32_t)t2);
+    }
+    CHECK(!any);
+  }
+
+  // einzelne Stoesse
+  sd = makeShake();
+  CHECK(!feedKnocks(sd, 1, 400));
+  sd = makeShake();
+  CHECK(!feedKnocks(sd, 2, 200));
+  sd = makeShake();
+  CHECK(!feedKnocks(sd, 3, 200));
+  // vier Klopfer im Abstand von 300 ms liegen im 1-s-Fenster, im Abstand von 400 ms nicht
+  sd = makeShake();
+  CHECK(feedKnocks(sd, 4, 300));
+  sd = makeShake();
+  CHECK(!feedKnocks(sd, 4, 400));
+
+  // Luecke zwischen den Samples: grosse Spruenge ueber 300 ms zaehlen nicht
+  sd = makeShake();
+  any = false;
+  for (int k = 0; k < 40; ++k) any |= sd.add({(k % 2) ? 2.0f : -2.0f, 0, 1}, (uint32_t)(k * 300));
+  CHECK(!any);
+}
+
+static void test_daylog() {
+  char b[48];
+  dayLogPath(b, sizeof b, mk(2026, 10, 29, 9, 5, 7), true);
+  CHECK(strcmp(b, "/log_2026-10-29.csv") == 0);
+  dayLogPath(b, sizeof b, mk(2026, 1, 2, 23, 59, 59), true);
+  CHECK(strcmp(b, "/log_2026-01-02.csv") == 0);
+  dayLogPath(b, sizeof b, 12345, false);
+  CHECK(strcmp(b, "/log_ohne_zeit.csv") == 0);
+  // lokale Mitternacht, auch am Tag der Zeitumstellung (25.10.2026 hat 25 Stunden)
+  CHECK(localMidnight(mk(2026, 10, 29, 9, 5, 7)) == mk(2026, 10, 29, 0, 0, 0));
+  CHECK(localMidnight(mk(2026, 10, 29, 0, 0, 0)) == mk(2026, 10, 29, 0, 0, 0));
+  CHECK(localMidnight(mk(2026, 10, 29, 23, 59, 59)) == mk(2026, 10, 29, 0, 0, 0));
+  CHECK(localMidnight(mk(2026, 10, 25, 12, 0)) == mk(2026, 10, 25, 0, 0));
+  CHECK(mk(2026, 10, 26, 0, 0) - localMidnight(mk(2026, 10, 25, 12, 0)) == 25 * 3600);
+  // Namen sortieren zeitlich (Grundlage fuer den gemeinsamen Export)
+  char a1[48], a2[48];
+  dayLogPath(a1, sizeof a1, mk(2026, 10, 28, 12, 0), true);
+  dayLogPath(a2, sizeof a2, mk(2026, 10, 29, 12, 0), true);
+  CHECK(strcmp(a1, a2) < 0);
+  dayLogPath(a1, sizeof a1, 0, false);
+  CHECK(strcmp(a2, a1) < 0);  // "ohne_zeit" kommt zuletzt
+}
+
 int main() {
   setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
   tzset();
@@ -378,6 +496,8 @@ int main() {
   test_tracker();
   test_accrue();
   test_csv();
+  test_shake();
+  test_daylog();
   printf("%d bestanden, %d fehlgeschlagen\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

@@ -129,6 +129,34 @@ class Tracker {
   uint32_t since_;
 };
 
+// ---------------------------------------------------------------- Schuetteln
+// Erkennt Schuetteln aus dem Beschleunigungsvektor: mehrere kraeftige Spitzen kurz hintereinander. Eine Spitze ist ein
+// lokales Maximum der Aenderung |a(k) - a(k-1)| (in g) ueber jerkG. Ein einzelner Stoss (Aufsetzen, Anstossen) liefert
+// ein bis zwei Spitzen dicht beieinander, Schuetteln eine je Halbperiode; Spitzen naeher als minGapMs zaehlen als
+// eine. Samples mit mehr als maxSampleGapMs Abstand (z. B. nach einem Ton) werden nicht miteinander verglichen.
+// Langsames Drehen (Rollen, Umlegen) bleibt weit unter der Schwelle.
+class ShakeDetector {
+ public:
+  static constexpr int kMaxPeaks = 8;
+  ShakeDetector(float jerkG, int peaks, uint32_t windowMs, uint32_t minGapMs = 70, uint32_t maxSampleGapMs = 60);
+  void reset();
+  // true, sobald 'peaks' Spitzen innerhalb von windowMs lagen; danach beginnt die Zaehlung neu
+  bool add(const Vec3& a, uint32_t nowMs);
+ private:
+  bool addPeak(uint32_t tMs);
+  float jerkG_;
+  int peaks_;
+  uint32_t windowMs_, minGapMs_, maxGapMs_;
+  Vec3 prev_;
+  uint32_t prevMs_;
+  bool hasPrev_;
+  float d1_, d2_;   // letzte beiden Aenderungen (d1_ = juengste)
+  uint32_t t1_;     // Zeitpunkt von d1_
+  int nd_;          // gueltige Aenderungen in d1_/d2_ (0..2)
+  uint32_t peakMs_[kMaxPeaks];
+  int n_;           // gezaehlte Spitzen im Fenster
+};
+
 // ---------------------------------------------------------------- Teach-in
 // Seite 0 oben starten, dann der Reihe nach die Seiten 1.. nach oben bringen. Eine neue
 // ruhige Lage wird die naechste Seite, wenn sie >= minSepDeg von allen bisherigen entfernt
@@ -171,5 +199,10 @@ void formatHM(char* buf, size_t n, uint32_t seconds);
 const char* csvHeader();
 size_t formatCsvLine(char* buf, size_t n, time_t t, bool timeValid, int face, int project,
                      const char* name, int vbatMv);
+
+// Tageslog: "/log_JJJJ-MM-TT.csv" (lokales Datum von t), ohne gueltige Uhrzeit "/log_ohne_zeit.csv"
+void dayLogPath(char* buf, size_t n, time_t t, bool timeValid);
+// lokale Mitternacht (00:00:00) des Tages von t
+time_t localMidnight(time_t t);
 
 }  // namespace prisma
