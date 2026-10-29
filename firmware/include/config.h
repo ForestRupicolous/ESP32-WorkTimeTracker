@@ -95,7 +95,15 @@ static const uint16_t PROJECT_COLORS[] = {
 // BMI270 any-motion: 1 LSB = 0,48 mg bzw. 20 ms (Bosch-Doku / M5-Beispiel)
 #define ANYMOT_THRESHOLD 0xAA    // ~83 mg (Bosch-Default)
 #define ANYMOT_DURATION  5       // 100 ms
+// Nach dem Armieren schwingt das BMI270 ein und loest einmal aus (gemessen ca. 130 ms danach): wach bleiben,
+// den M5PM1-IRQ bei jeder Ausloesung loeschen und erst schlafen, wenn G13 IRQ_QUIET_MS lang ruhig HIGH war.
+#define IRQ_QUIET_MS      300    // so lange muss G13 ruhig HIGH sein
+#define IRQ_SETTLE_MAX_MS 2500   // laenger nicht warten (dann Timer-Rueckfall 60 s)
 #define SPEAKER_VOLUME   140     // < 75 % auf Akku (M5-Hinweis)
+// Diagnose der Weckkette (nur zur Fehlersuche, kostet Strom, Standard 0): 1 = beim Wecken die IRQ-Quellen loggen
+// (M5PM1- und BMI270-Status), nach dem Armieren das BMI270 zurueckpruefen, INT1 und G13 anderthalb Sekunden mit
+// Mikrosekunden-Zeitstempeln verfolgen und danach nochmal anderthalb Sekunden die Bewegung (mg) loggen.
+#define WAKE_DIAG        0
 
 // ---------------------------------------------------------------- Bedienung Taste A
 #define BTN_WEB_MS       2000    // halten: WLAN-Export starten

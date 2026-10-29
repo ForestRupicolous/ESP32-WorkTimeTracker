@@ -12,6 +12,9 @@ int  batteryMv();                     // 0 bei Fehler
 esp_sleep_wakeup_cause_t wakeCause();
 bool wokeByButton();
 
+// Diagnose (WAKE_DIAG): beim Wecken gelesene IRQ-Quellen ausgeben. Ohne WAKE_DIAG ein No-op.
+void logWakeDiag();
+
 // Deep Sleep bis Bewegung (IMU any-motion -> M5PM1 PYG4 -> IRQ PYG1 -> ESP G13)
 // oder Taste A (G11). Kehrt nie zurueck.
 [[noreturn]] void sleepUntilMotion();

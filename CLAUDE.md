@@ -17,6 +17,8 @@ TimeFlip-artiger Zeiterfasser. **Standard: 8-Eck-„Münze“**, 53,8 mm Schlüs
   - M5PM1: PYG1_IRQ → G13, PYG4 ← BMI270 INT1, PYG2 = L3B-Schalter (Backlight/Mic/Lautsprecher), PYG3 = Lautsprecher-Verstärker.
   - Quellen: https://docs.m5stack.com/en/core/StickS3 und https://docs.m5stack.com/en/arduino/m5sticks3/m5pm1
 - Stromangaben M5: L2-Zustand (ESP schläft) ca. 102 µA, ausgeschaltet ca. 14 µA.
+- **BMI270 nach `M5.begin()`: `INT_MAP_DATA` (0x58) = 0xFF** (Daten-bereit-, FIFO- und Fehler-Interrupts auf INT1/INT2, am Gerät am 29.10.2026 zurückgelesen). Vor dem Armieren von any-motion muss das auf 0 (macht `bmiArmAnyMotion()`), sonst pulst INT1 mit 50 Hz und der Stick wacht nach dem Einschlafen sofort wieder auf. Die any-motion-Feature-Wörter sind nur bei ausgeschaltetem Advanced-Power-Save lesbar.
+- M5PM1-GPIO-IRQ-Status wird flankengetriggert gesetzt und hält G13 Low, bis er gelöscht ist. Vor dem Schlafen G13 mindestens 300 ms ruhig High sehen (`waitIrqQuiet()`).
 - M5Unified remappt die IMU-Achsen für den StickS3 (`IMU_Class.inl`: „X=+Y, Y=-X, Z=+Z“). Wie Displayrotation und Achsen zusammenhängen, ist **nicht** dokumentiert → `DISP_ROT_OFFSET/DIR` in `config.h`.
 - Maße aus dem offiziellen Strukturmodell (`make ref` → `ref/StickS3.stl`):
   - 48,0 × 24,0 × 14,08 mm; Taste A ragt 0,92 mm vor
@@ -81,20 +83,20 @@ In Claude Code nachgeprüft (29.10.2026):
 
 Am Gerät (29.10.2026):
 - Chip laut esptool: ESP32-S3-PICO-1 (LGA56) v0.2, 8 MB Flash, 8 MB PSRAM, USB-Serial/JTAG (`303a:1001`, `/dev/ttyACM0`).
-- Vor dem Flashen startete der Stick im Sekundentakt neu (Kernel-Log: ständig neue USB-Gerätenummern). Ursache ungeklärt. Der Download-Modus (seitliche Reset-Taste halten, bis die grüne LED blinkt, laut M5-Doku) machte ihn stabil.
+- Vor dem Flashen startete der Stick im Sekundentakt neu (Kernel-Log: ständig neue USB-Gerätenummern). Sehr wahrscheinlich die Wecken-Schleife (siehe unten), nicht nachgestellt. Der Download-Modus (seitliche Reset-Taste halten, bis die grüne LED blinkt, laut M5-Doku) machte ihn stabil.
 - `make flash ENV=muenze8` schrieb Bootloader, Partitionstabelle, boot_app0 und App (1.135.744 Bytes), alle Hashes verifiziert.
 - Nach dem Flashen blieb der Stick im Bootloader: Der RTS-Hard-Reset von esptool führt hier zu `boot:0x21 (DOWNLOAD(USB/UART0))`. Ein **Watchdog-Reset startet die App** (`esptool.py ... --before default_reset --after watchdog_reset chip_id`).
 - Startzeile gesehen: `Start: kalt=1 Weckgrund=0 Seite=-1 Modell=0 Akku=4170 mV Bauform=Muenze/9`. Keine Fehlermeldung zu M5PM1/BMI270, Akkuspannung aus dem M5PM1 gelesen, WLAN offenbar verbunden (keine Warnung „WLAN nicht erreichbar“). NTP-Ergebnis, Teach-in, Seitenerkennung, Wecken per Bewegung, Tasten, Töne und Strom sind **nicht getestet**.
 - ModemManager hielt den Port offen (der Port wanderte von `ttyACM0` auf `ttyACM1`), PlatformIO meldet veraltete udev-Regeln (`99-platformio-udev.rules`). Das erklärt die wandernde Port-Nummer vermutlich, nicht die Neustart-Schleife. Befehl zum Erneuern: README, Abschnitt Flashen.
 - Neue Ringerkennung (geflasht): Der erste Seitenwechsel kam 0,85 s nach Beginn der Abtastung (Log `Seite 5 -> Projekt 5`), das Teach-in-Modell aus dem NVS blieb erhalten (`Modell=1`). Wie es sich beim Rollen anfühlt, ist nicht bestätigt.
-- **Wecken-Schleife:** Bewegung weckt zwar (`Weckgrund=2`), aber nach dem Einschlafen kommt ca. 0,6 s später sofort wieder ein Wecken, dreimal, dann Rückfall „Timer 60 s“ (`hal.cpp:169`), auch bei unberührtem Stick am USB. Die IRQ-Leitung G13 liegt kurz nach dem Armieren wieder auf Low. Wahrscheinlich war das auch die Neustart-Schleife vor dem Flashen (alte Firmware, gleicher Schlafcode). Debug-Ansatz: Pegel G13, BMI270-INT-Status und M5PM1-IRQ-Register vor und nach dem Einschlafen loggen; Rückfall `POWER_DEEPSLEEP 0`.
+- **Wecken-Schleife, Ursache gefunden und behoben (29.10.2026):** Der Stick wachte nach dem Einschlafen ca. 0,6 s später sofort wieder auf (`Weckgrund=2`), dreimal, dann Rückfall „Timer 60 s“, auch bei unberührtem Stick. Ursache: BMI270 `INT_MAP_DATA` stand nach `M5.begin()` auf 0xFF, INT1 pulste mit jedem Messwert (Trace: Impulse nur auf dem 20-ms-Raster), der M5PM1 hielt G13 per Flanken-Status auf Low. Fix in `bmiArmAnyMotion()` (`INT_MAP_DATA`, `INT2_MAP_FEAT`, `INT2_IO_CTRL` = 0) plus `waitIrqQuiet()` vor dem Schlafen. Gemessen mit `WAKE_DIAG 1`: 0 INT1-Impulse in 1,5 s, ruhig nach 300 ms, der Stick blieb im Deep Sleep. Details und Log-Format: README, „Diagnose der Weckkette“. **Nicht bestätigt:** Wecken durch echte Bewegung und die Version ohne Diagnose (`WAKE_DIAG 0`, Standard).
 - Befehle und Erklärung zu allem Verhalten der Firmware: README (Flashen, Funktionsweise, Fehlersuche). Für Erklärungen zuerst die README lesen, nicht den Code.
 - Die BMI270-any-motion-Register werden direkt geschrieben (`hal.cpp`, nach Bosch SensorAPI `bmi270.c`). Das M5-Beispiel nutzt dafür die SparkFun-Lib.
 
 ## Nächste Schritte (Reihenfolge)
 1. Erledigt (29.10.2026): `make build`, alle drei Envs bauen. Bei neuen M5Unified-/M5PM1-Ständen erneut prüfen (`lib_deps` sind nicht gepinnt).
 2. Erledigt (29.10.2026): geflasht, Startzeile gesehen, M5PM1/BMI270 ohne Fehler. Offen: udev-Regeln erneuern (README, Flashen) und prüfen, ob `make flash` die App danach von selbst startet.
-3. **Weckkette prüfen:** Teilweise bestätigt (Bewegung weckt, `Weckgrund=2`), aber Wecken-Schleife nach dem Einschlafen (siehe Stand, „Am Gerät“). Fehler suchen; Rückfall ist `POWER_DEEPSLEEP 0`.
+3. **Weckkette prüfen:** Wecken-Schleife behoben (siehe Stand, „Am Gerät“). Offen: Version mit `WAKE_DIAG 0` flashen, Stick bewegen und `Weckgrund=2` samt Seitenwechsel im Log sehen; Empfindlichkeit abstimmen (`ANYMOT_THRESHOLD`, `ANYMOT_DURATION`). Rückfall bleibt `POWER_DEEPSLEEP 0`.
 4. Teach-in durchspielen, Erkennung aller 8 Seiten und der Pause prüfen. Ringerkennung am Gerät abstimmen (Rückmeldung 29.10.2026: Wechsel deutlich schneller, in der Drehachse immer ein Projekt, mit Hysterese): `RING_HYST_DEG`, `RING_UPRIGHT_DEG`, `SETTLE_MS`, `STILL_WINDOW` in `config.h`.
 5. `DISP_ROT_OFFSET/DIR` so kalibrieren, dass der Text aufgestellt aufrecht steht.
 6. Ruhestrom/Laufzeit: `vbat_mv` im Log über einige Tage beobachten.
