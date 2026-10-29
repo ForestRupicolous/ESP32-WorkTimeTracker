@@ -68,7 +68,7 @@ make ref && make gehaeuse  # Gehäuse erzeugen und gegen das M5-Modell prüfen
 - **WLAN-Zugangsdaten nie in getrackte Dateien** (das Repo ist öffentlich auf GitHub). Sie stehen in `firmware/include/config_local.h` (gitignored); `config.h` bindet sie per `__has_include` ein. Beim Integrieren einer neuen ZIP prüfen, dass `config.h` diesen Block noch hat, und nur gezielte Pfade stagen.
 
 ## Stand
-**Nicht auf Hardware getestet, Gehäuse nicht gedruckt.** Alles Folgende ist nur am PC geprüft.
+**Auf Hardware nur geflasht, nicht getestet; Gehäuse nicht gedruckt.** Am StickS3 belegt ist nur der Block „Am Gerät“ unten, alles andere ist nur am PC geprüft.
 
 Ende der claude.ai-Sitzung (28.10.2026): Firmware dort nie mit der ESP32-Toolchain gebaut (kein Zugriff), geprüft nur gegen Stub-Header mit den echten M5Unified-/M5PM1-Signaturen und per Host-Tests.
 
@@ -78,11 +78,18 @@ In Claude Code nachgeprüft (29.10.2026):
 - Gehäuse: `--check` gegen das M5-Modell besteht für Münze 8 (10 Punkte), Münze 12 (8) und Prisma 10 (14). Die gelieferte STL `zeitprisma_muenze8_22mm_usb.stl` entspricht dem Skript (gleiches Volumen, Eckpunkte um höchstens 0,001 mm verschieden), misst 53,80 × 53,80 × 22,00 mm und ist wasserdicht.
 - Kippgrenzen (gerechnet, Stick-Schwerpunkt = Mitte angenommen): Münze 8 ab 21,0° (flach um ab 20,1°), Münze 12 ab 13,4°, Prisma 10 je nach Seite ab 12,2–18,5°.
 - Die Gehäuse-Skripte brauchten eine Korrektur: `CrossSection.even_odd` gibt es in manifold3d 3.5.4 nicht, jetzt `CrossSection(..., FillRule.EvenOdd)`.
+
+Am Gerät (29.10.2026):
+- Chip laut esptool: ESP32-S3-PICO-1 (LGA56) v0.2, 8 MB Flash, 8 MB PSRAM, USB-Serial/JTAG (`303a:1001`, `/dev/ttyACM0`).
+- Vor dem Flashen startete der Stick im Sekundentakt neu (Kernel-Log: ständig neue USB-Gerätenummern). Ursache ungeklärt. Der Download-Modus (seitliche Reset-Taste halten, bis die grüne LED blinkt, laut M5-Doku) machte ihn stabil.
+- `make flash ENV=muenze8` schrieb Bootloader, Partitionstabelle, boot_app0 und App (1.135.744 Bytes), alle Hashes verifiziert.
+- Danach blieb der Stick im Bootloader (esptool antwortete ohne Reset). **App-Start und Startzeile sind nicht bestätigt.** Befehle und Erklärung zu allem Verhalten der Firmware: README (Flashen, Funktionsweise, Fehlersuche).
+- Für Erklärungen zum Firmware-Verhalten zuerst die README lesen, nicht den Code.
 - Die BMI270-any-motion-Register werden direkt geschrieben (`hal.cpp`, nach Bosch SensorAPI `bmi270.c`). Das M5-Beispiel nutzt dafür die SparkFun-Lib.
 
 ## Nächste Schritte (Reihenfolge)
 1. Erledigt (29.10.2026): `make build`, alle drei Envs bauen. Bei neuen M5Unified-/M5PM1-Ständen erneut prüfen (`lib_deps` sind nicht gepinnt).
-2. Flashen, `make log`: Erscheint die Startzeile „Start: kalt=… Weckgrund=…“? Wurden M5PM1 und BMI270 gefunden?
+2. Geflasht (29.10.2026), App-Start offen: Seitentaste einmal klicken, dabei `make log` schon laufen haben. Erscheint die Startzeile „Start: kalt=… Weckgrund=…“? Wurden M5PM1 und BMI270 gefunden?
 3. **Weckkette prüfen:** Deep Sleep → Münze bewegen → aufwachen (Weckgrund im Log). Wenn das nicht geht: Fehler suchen; Rückfall ist `POWER_DEEPSLEEP 0`.
 4. Teach-in durchspielen, Erkennung aller 8 Seiten und der Pause prüfen (Fangbereich ±18°).
 5. `DISP_ROT_OFFSET/DIR` so kalibrieren, dass der Text aufgestellt aufrecht steht.
