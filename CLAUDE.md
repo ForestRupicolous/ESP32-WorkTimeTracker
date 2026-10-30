@@ -116,6 +116,33 @@ Am Gerät (29.10.2026):
 6. Ruhestrom/Laufzeit: `vbat_mv` im Log über einige Tage beobachten.
 7. Erledigt (Nutzer, 29.10.2026): Gehäuse gedruckt, funktioniert. Einzelheiten nicht genannt: Passung der Tasche, Magnet-Halt an der Scheibe (M8 DIN 125), USB-Stecker im Loch, Kippverhalten, Entnahme ohne Ausdrückloch.
 
+## Ideen (zurückgestellt, nichts davon umgesetzt)
+Stand 30.10.2026. Aus Fragen des Nutzers. Fakten aus dem Code gelesen oder per Websuche geprüft, am Gerät nichts getestet. Erst anfangen, wenn der Nutzer es will.
+
+1. **Projektnamen und Farben per WLAN-Weboberfläche ändern** (Nutzer: „aktuell nicht umsetzen“).
+   - Heute: Die Weboberfläche ist nur lesend (`/`, `/log.csv`, `/tag`, alles GET, `net.cpp`), der Server läuft nur im Export (Taste A 2 s, höchstens 5 min). Namen (`PROJECT_NAMES`, aus `config_local.h`) und Farben (`PROJECT_COLORS`, RGB565 in `config.h`) sind Konstanten und ändern sich nur durch Neu-Flashen.
+   - Umsetzung: feste Arrays → Laufzeittabelle (Name + RGB565 je Projekt), gespeichert als LittleFS-Datei (das NVS wird fürs Neu-Einlernen gelöscht); `config_local.h` bleibt Standard und „Zurücksetzen“. Formular auf `/` plus POST-Handler, Farbwahl per `<input type="color">`, Umrechnung auf RGB565 am Stick. `main.cpp` (Übertragszeile, Log, Anzeige, Statusseite) und `ui.cpp` greifen dann über eine Funktion auf die Tabelle zu.
+   - Haken: Namen nur ASCII und ohne Komma oder Anführungszeichen (CSV). Die Übersicht kürzt auf 7 Zeichen (`%-7.7s`, `ui.cpp`), die maximale Länge auf der Projektanzeige (Font 4, 240 px) ist nicht gemessen. Die Projektanzeige schreibt schwarzen Text auf die Farbe, die Übersicht den Namen in Projektfarbe auf Schwarz: Dunkle Farben sind in einer der beiden Ansichten unlesbar, also Mindesthelligkeit erzwingen oder Textfarbe nach Helligkeit wählen. Keine Anmeldung, jeder im selben WLAN könnte während des Exports ändern. Die Auswertung summiert nach Namen (siehe Punkt 4). Vorteil: Kundennamen müssten nicht mehr in `config_local.h` stehen.
+   - Test: Namen bereinigen und Farbumrechnung am PC (`prisma_core`), das Formular erst am Gerät (Flashen mit „bereit“).
+
+2. **Logs per USB als Laufwerk (Massenspeicher) lesen** (nur Machbarkeit besprochen, keine Entscheidung).
+   - Der Arduino-Core 2.0.17 hat `USBMSC` (`cores/esp32/USBMSC.h`: `begin(Blockzahl, Blockgröße)`, `onRead`, `onWrite`).
+   - Heute läuft USB als CDC+JTAG (`-DARDUINO_USB_MODE=1`, `-DARDUINO_USB_CDC_ON_BOOT=1` in `platformio.ini`, Gerät `303a:1001`). Dieser Controller kann keinen Massenspeicher, dafür braucht es TinyUSB (`ARDUINO_USB_MODE=0`). Beide teilen sich Anschluss und PHY (der Core schaltet mit `usb_switch_to_cdc_jtag()` um), es geht immer nur einer.
+   - Folge für Flashen und Mitlesen: esptool-Auto-Reset und `make log` laufen heute über CDC+JTAG. Mit TinyUSB braucht es ein Verbundgerät CDC+MSC und den 1200-Baud-Trick (Core: `USBCDC.cpp`, `usb_persist_restart(RESTART_BOOTLOADER)`) oder die Seitentaste, die im Gehäuse nicht erreichbar ist. Der ROM-Download-Modus bleibt. Ein fehlerhafter Stand wäre im geschlossenen Gehäuse schwerer zu retten.
+   - Dateisystem: Kein PC liest LittleFS, es braucht FAT. Der kleinste Eingriff wäre eine schreibgeschützte, virtuelle FAT-Ansicht aus den Log-Dateien (Dateigrößen als Schnappschuss, die Logs werden nur angehängt). FFat statt LittleFS bedeutet ein anderes Partitionslayout und ist riskanter.
+   - Eigener Modus nötig, weil der USB-Port im Deep Sleep verschwindet: Haltezeit an Taste A statt Kabelerkennung (Ladegeräte liefern auch 5 V).
+   - Aufwand mittel bis hoch, „auf jedem PC“ ist nur unter Linux prüfbar. Empfehlung: nur wenn der WLAN-Export im Alltag nicht reicht, vorher ein kleiner Test (MSC + CDC, danach Wiederflashen).
+
+3. **Server und Open-Source-Zeiterfassung** (Nutzer: Ziel ist die Übersicht, nicht die Abrechnung; „noch nichts umsetzen“).
+   - Heute kein Upload, der Stick wird nur abgeholt.
+   - **Weg A (empfohlen):** Ein Skript am Rechner holt `/log.csv` (Export aktiv) und legt die Abschnitte per API an. Es muss die Pause auslassen, den offenen letzten Abschnitt behandeln, Doppeleinträge vermeiden und Projektnummern dem Ziel zuordnen. Token und Zuordnung (Kundennamen) stehen nur in einer lokalen, nicht getrackten Datei.
+   - **Weg B:** Der Stick lädt selbst hoch (Firmware-Umbau, WLAN-Verbindung kostet Energie und Zeit, Token und HTTPS auf dem Stick). Wenn, dann gebündelt auf Tastendruck oder täglich, nicht bei jedem Wechsel.
+   - Kandidaten (Websuche 30.10.2026, nicht ausprobiert): **TimeTagger** (GPL-3.0, `pip` oder Docker, SQLite, PDF- und CSV-Berichte, tag-basiert) passt für die Übersicht. Die API v2 nimmt den Header `authtoken`, Einträge legt oder ändert man per `PUT` mit einer JSON-Liste. Löschen geht nicht (eine Beschreibung mit „HIDDEN“ gilt als gelöscht). Die API ist laut Doku nicht offiziell stabil, die Felder eines Eintrags sind nicht geprüft. Ein fester Schlüssel je Abschnitt würde Doppeleinträge vermutlich verhindern (nicht bestätigt). **Kimai** (AGPL-3.0, Docker, laut Deploy-Seite nur MySQL/MariaDB, REST mit Bearer-Token und HTTPS, Zeiten ohne Zeitzone im HTML5-Format, die Doku nennt keinen Duplikatschutz) wäre für die Abrechnung nach Kunden und Projekten. **Traggo** (GPL-3.0, API nicht belegt) und **solidtime** (AGPL-3.0, CSV-Import aus Toggl und Clockify, API nicht bestätigt). Nicht als Server geeignet: Super Productivity, ActivityWatch, Timewarrior.
+   - Quellen: https://timetagger.readthedocs.io/en/latest/webapi/, https://github.com/almarklein/timetagger, https://www.kimai.org/documentation/rest-api.html, https://github.com/solidtime-io/solidtime
+   - Erste Schritte, falls gewollt: TimeTagger per Docker testen, einen Eintrag per `curl` anlegen, dann das Skript schreiben.
+
+4. **Auswertung nach Projektnummer statt Name:** `tools/auswertung.py` summiert nach dem Namen aus dem Log (`sums[(key, name)]`). Nach einer Umbenennung stehen „Projekt n“ und die neuen Namen in getrennten Spalten (an den echten Logs am 30.10.2026 gesehen). Idee: nach Projektnummer gruppieren und den letzten Namen anzeigen. Kleine Änderung, nicht umgesetzt.
+
 ## Annahmen / offene Punkte
 - Stick-Schwerpunkt (Lage des Akkus) unbekannt → die Stabilitätsrechnung nimmt die Mitte an.
 - USB-Loch 13,5 × 7 mm: Stecker bis ca. 12,4 × 6,7 mm passen, dicke Umspritzungen eventuell nicht.
