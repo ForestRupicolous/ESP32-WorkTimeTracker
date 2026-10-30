@@ -44,7 +44,7 @@ Eine Lage, die nicht passt (zum Beispiel dieselbe Seite noch einmal), ignoriert 
 ### Daten abrufen und auswerten
 - **Auf dem Stick** liegt je Tag eine CSV-Datei mit einer Zeile je Wechsel: `zeit,epoch,seite,projekt,name,vbat_mv,zeit_ok` (`zeit_ok` = 1, wenn die Uhrzeit gültig war). Wechsel ohne gültige Uhrzeit stehen in einer eigenen Datei.
 - **Abrufen:** Taste A 2 s halten und loslassen. Der Stick verbindet sich mit dem WLAN und zeigt `http://zeitprisma.local` und seine IP, dazu ein langer Ton. Am Rechner im selben WLAN diese Adresse im Browser öffnen: Die Startseite zeigt die Tagessummen und die Liste der Tagesdateien, „Alle Tage (log.csv)“ lädt alles als `zeitprisma.csv`. Auf der Kommandozeile geht es mit `curl -o zeitprisma.csv http://zeitprisma.local/log.csv` (alle Tage) oder `curl 'http://zeitprisma.local/tag?d=2026-10-29'` (ein Tag). Löst `zeitprisma.local` nicht auf, die IP vom Display nehmen. Beenden: Taste A klicken oder 5 min warten.
-- **Auswerten:** `python3 tools/auswertung.py zeitprisma.csv [--woche] [--csv out.csv]` rechnet Stunden je Projekt und Tag bzw. Woche (das Skript braucht nur Python 3). Die Pause wird nicht summiert, Abschnitte über Mitternacht werden geteilt.
+- **Auswerten:** `python3 tools/auswertung.py zeitprisma.csv [--woche] [--csv out.csv]` rechnet Stunden je Projekt und Tag bzw. Woche (das Skript braucht nur Python 3). Die Pause wird nicht summiert, Abschnitte über Mitternacht werden geteilt. Summiert wird nach dem Namen aus dem Log: Nach einer Umbenennung stehen alter und neuer Name in getrennten Spalten.
 
 ### Laden und Akku
 - **Laden:** USB-C-Kabel in das Loch an Seite 3 stecken (das Loch misst 13,5 × 7 mm; schlanke Stecker passen, sehr dicke Umspritzungen eventuell nicht).
@@ -62,7 +62,7 @@ Eine Lage, die nicht passt (zum Beispiel dieselbe Seite noch einmal), ignoriert 
 ### Bekannte Einschränkungen
 - **Anzeige-Drehung:** Beim Aufstellen dreht sich der Text. Ob er überall aufrecht steht, ist noch nicht abgestimmt, und auf den schrägen Seiten (1, 3, 5, 7) steht er um 45° schief.
 - **Schnelles Rollen:** Ob Zwischenseiten beim sehr schnellen Rollen zuverlässig ausgeblendet werden, ist nicht geprüft.
-- **Noch nicht am Gerät beobachtet:** Einlernen per Taste A (6 s) und der Tageswechsel um Mitternacht.
+- **Noch nicht am Gerät beobachtet:** Einlernen per Taste A (6 s).
 - **Nicht gemessen:** Akkulaufzeit und Genauigkeit der Uhr im Schlaf. Die Uhr wird bei einem Projektwechsel per Internet nachgestellt, wenn der letzte Abgleich mehr als 6 h her ist.
 
 Prüfergebnisse im Einzelnen: Teil 2, „Stand der Prüfung“.
@@ -135,21 +135,20 @@ Das eingelernte Seitenmodell bleibt beim Flashen derselben Bauform erhalten; bei
 - **Schlafenden Stick flashen:** Der Port ist nur 1 bis 3 s nach einer Bewegung da. Eine Schleife prüft alle 50 ms, ob `/dev/ttyACM*` erscheint, und startet dann sofort `esptool.py --chip esp32s3 --port <Port> --before default_reset --after no_reset --connect-attempts 1 flash_id` (mit `timeout 15`). Damit steht der Chip im ROM-Bootloader und bleibt dort stehen. Danach `make flash ENV=muenze8` und der Watchdog-Reset aus dem Punkt „Nach dem Flashen die App starten“. Der Stick muss während der Schleife bewegt werden (Rollen genügt).
 
 ### Stand der Prüfung
-Stand 29.10.2026, Einschränkungen zuerst.
+Stand 30.10.2026, Einschränkungen zuerst.
 
 | Bereich | Stand |
 |---|---|
-| Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s, Darstellung eigener Projektnamen am Display, Übertragszeile um Mitternacht, Anzeige-Drehung, Stromverbrauch und Laufzeit | **nicht geprüft** |
+| Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s, Darstellung eigener Projektnamen am Display, Anzeige-Drehung, Stromverbrauch und Laufzeit | **nicht geprüft** |
 | Gehäuse (gedruckt) | funktioniert laut Nutzer (ohne Log, ohne Einzelheiten) |
 | Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz | vom Nutzer am Gerät bestätigt (ohne Log) |
 | Teach-in (ohne Gehäuse) | lief am Gerät durch (9 Seiten, Abweichung max 6,0°) |
-| WLAN-Export (Taste A 2 s), Tagesdateien, Gesamtdatei | am Gerät abgerufen und geprüft |
+| WLAN-Export (Taste A 2 s), Tagesdateien, Gesamtdatei, Tageswechsel um Mitternacht (Übertragszeile, neue Tagesdatei) | am Gerät abgerufen und geprüft |
 | Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand (ohne Gehäuse), eigene Projektnamen aus `config_local.h` im Log | am Gerät im Log gemessen |
 
 **Nicht am Gerät geprüft:**
 - Teach-in im Gehäuse (der Nutzer meldet das Gehäuse insgesamt als funktionierend, das Teach-in darin nicht gesondert) und Taste A 6 s halten (Teach-in per Taste).
 - Darstellung der eigenen Projektnamen auf dem Display (im Log stehen sie; die Übersicht kürzt Namen auf 7 Zeichen).
-- Übertragszeile um Mitternacht (kein Mitternachtsübergang gesehen) und Anlegen einer neuen Tagesdatei mit der `size()`-Prüfung (erst beim ersten Wechsel eines neuen Tages).
 - Stromverbrauch und Laufzeit, Anzeige-Drehung des aufgestellten Textes (Kalibrierung `DISP_ROT_OFFSET/DIR`), schnelles Rollen mit der kurzen Entprellung.
 - Zeiten für Schütteln und Wecken per Taste (nicht gemessen).
 
@@ -162,6 +161,7 @@ Stand 29.10.2026, Einschränkungen zuerst.
 - **Projektnamen:** Die eigenen Namen aus `config_local.h` stehen im Log (`Seite n -> Name`, alle 9 Seiten der Münze 8 gesehen).
 - **Teach-in** (ohne Gehäuse): lief durch (9 Seiten, Abweichung max 6,0°), die erste Tagesdatei wurde angelegt.
 - **WLAN-Export:** Taste A 2 s halten startet ihn, der Stick ist danach per WLAN erreichbar. Abgerufen und geprüft: Startseite, Tagesdatei und Alt-Datei einzeln, Gesamtdatei auch per HTTP/1.1 (siehe Log-Datei).
+- **Tageswechsel:** Die neue Tagesdatei beginnt mit der Übertragszeile `00:00:00` (Projekt des Vortags, `vbat_mv` 0, `epoch` = lokale Mitternacht) und wurde mit dem ersten Wechsel des Tages angelegt (Kopf, Übertragszeile, Ereignisse). In beiden Tagesdateien sind die Zeiten aufsteigend und passen zu `epoch`, `zeit_ok` ist überall 1, `seite` und `projekt` widersprechen sich nirgends. Die Tagessummen auf der Startseite begannen bei 0.
 
 **Vom Nutzer am Gerät bestätigt** (ohne Log):
 - Die Töne sind gut (8 verschiedene weiche Einzeltöne), beim Wecken aus dem Liegen in ein Projekt kommt der Ton, die Projektanzeige (5 s, mit der aufsummierten Tageszeit des Projekts) passt, Schütteln im Liegen zeigt die Tagesübersicht, und Taste A zeigt sie nach einem kurzen Klick aus dem Deep Sleep.
@@ -253,7 +253,7 @@ Eine Datei je Tag auf LittleFS: `/log_JJJJ-MM-TT.csv` (lokales Datum des Wechsel
 - **Alt-Datei:** Eine vorhandene `/log.csv` (Format der älteren Firmware) wird nicht mehr beschrieben, im Export aber weiter angeboten (Schlüssel `alt`, in der Gesamtdatei zuerst).
 - **Export:** siehe WLAN-Export. Einzelne Tage lassen sich auch aneinanderhängen (`cat log_*.csv > alle.csv`); zusätzliche Kopfzeilen überspringt `auswertung.py`, weil dort `zeit_ok` nicht „1“ ist.
 - **Platz:** Die LittleFS-Partition ist 1,5 MB groß (`default_8MB.csv`, 0x180000). Rechnerisch (nicht gemessen) belegt jede Datei mindestens einen 4-KB-Block, das reicht für etwa 380 Tagesdateien. Ist der Speicher voll, scheitert das Schreiben (`Log schreiben fehlgeschlagen`). Alte Tage löscht die Firmware nicht.
-- **Am Gerät geprüft (per WLAN-Export abgerufen):** Tagesdatei und Alt-Datei sind einzeln korrekt lesbar (Kopf + Wechsel, alle `zeit_ok` = 1, keine Übertragszeile, weil kein Mitternachtsübergang). `/log.csv` per HTTP/1.1 kam 3 von 3 Mal vollständig an (Länge = `Content-Length`, alle drei identisch, genau Kopfzeile + Alt-Datei ohne Kopf + Tagesdatei ohne Kopf; die Datei wächst nur am Ende, ein früherer Stand ist jeweils der Anfang des späteren). 24 weitere Abrufe aller vier Adressen (`/`, `/log.csv`, `/tag?d=<Tag>`, `/tag?d=alt`) lieferten alle 200 in 0,08 bis 0,36 s. Ungültige Argumente liefern 400 (`../../etc/passwd`, `2026-10-2x`), eine fehlende Datei 404. `tools/auswertung.py` rechnet die Gesamtdatei durch. Einmal lief ein `curl` auf einen Einzeltag-Abruf in ein Zeitlimit (28), danach nicht reproduzierbar, Ursache nicht geklärt. Nicht geprüft: die Übertragszeile am Mitternachtsübergang und das Anlegen einer neuen Tagesdatei mit der neuen `size()`-Prüfung (erst beim ersten Wechsel eines neuen Tages). Am PC getestet sind nur Dateiname und lokale Mitternacht (auch am Tag der Zeitumstellung).
+- **Am Gerät geprüft (per WLAN-Export abgerufen):** Tagesdatei und Alt-Datei sind einzeln korrekt lesbar (Kopf + Wechsel, alle `zeit_ok` = 1, keine Übertragszeile, weil kein Mitternachtsübergang). `/log.csv` per HTTP/1.1 kam 3 von 3 Mal vollständig an (Länge = `Content-Length`, alle drei identisch, genau Kopfzeile + Alt-Datei ohne Kopf + Tagesdatei ohne Kopf; die Datei wächst nur am Ende, ein früherer Stand ist jeweils der Anfang des späteren). 24 weitere Abrufe aller vier Adressen (`/`, `/log.csv`, `/tag?d=<Tag>`, `/tag?d=alt`) lieferten alle 200 in 0,08 bis 0,36 s. Ungültige Argumente liefern 400 (`../../etc/passwd`, `2026-10-2x`), eine fehlende Datei 404. `tools/auswertung.py` rechnet die Gesamtdatei durch. Einmal lief ein `curl` auf einen Einzeltag-Abruf in ein Zeitlimit (28), danach nicht reproduzierbar, Ursache nicht geklärt. Der Tageswechsel ist geprüft: Die Übertragszeile steht um `00:00:00` am Anfang der neuen Tagesdatei, die Datei wurde mit dem ersten Wechsel des Tages angelegt (`size()`-Prüfung). Am PC getestet sind nur Dateiname und lokale Mitternacht (auch am Tag der Zeitumstellung).
 
 #### Serielle Ausgabe (USB-CDC, Log-Level Info)
 Eigene Ausgaben der Firmware:
@@ -288,7 +288,7 @@ Eigene Ausgaben der Firmware:
 `POWER_DEEPSLEEP 1`: Bewegung weckt den ESP32 über BMI270 any-motion → M5PM1 PYG4 → IRQ PYG1 → G13. Danach wird abgetastet, geloggt und wieder geschlafen. M5 gibt für diesen Board-Zustand (L2) ca. 102 µA an. Rechnerisch reicht das für einige Wochen pro Ladung, real bitte messen: `vbat_mv` wird mitgeloggt. Dauerwackeln (Tasche) → 5 min Timer-Schlaf. Rückfall `POWER_DEEPSLEEP 0`: Light Sleep mit Abfrage, einfacher, aber spürbar mehr Verbrauch.
 
 ### Offene Punkte (ungetestet)
-- **Am Gerät nicht getestet:** Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s halten (Teach-in per Taste), Übertragszeile um Mitternacht und Anlegen einer neuen Tagesdatei (Inhalt der Tagesdatei und Export sind am Gerät geprüft), Darstellung eigener Projektnamen am Display, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz und der WLAN-Export (siehe Stand der Prüfung).
+- **Am Gerät nicht getestet:** Teach-in im Gehäuse (nicht gesondert gemeldet), Taste A 6 s halten (Teach-in per Taste), Darstellung eigener Projektnamen am Display, Anzeige-Rotation des aufgestellten Textes, Stromverbrauch, schnelles Rollen mit der kurzen Entprellung. Bestätigt sind Start, Wecken per Bewegung, Seitenerkennung beim Rollen von Hand, Töne, Projektanzeige mit Tageszeit, Schütteln im Liegen, Taste A kurz, der WLAN-Export und der Tageswechsel (siehe Stand der Prüfung).
 - **Bootzeit, Rest (nicht untersucht):** Nach dem Schnellstart bleiben 0,57 s bis zur Startzeile: `setup@64`, `begin` 434 ms (`M5.begin()` ohne IMU: Display- und Power-Initialisierung, nicht aufgeschlüsselt), `hal` 72 ms. Ob sich die Display-Initialisierung beim Wecken per Bewegung sparen lässt (das Display bleibt dort ohnehin aus), ist offen.
 - **Wecken per Bewegung:** Nicht untersucht: wie viele Wecken ein Dauerrollen auslöst und wie sich Bewegung in einer Tasche verhält (45-s-Sitzungsgrenze, dann 5 min Schlaf).
 - **Weckkette, Empfindlichkeit:** Die any-motion-Konfiguration ist am Gerät zurückgelesen und stimmt (Dauer 5, Schwelle 0xAA ca. 80 mg, alle Achsen, nur INT1), und echte Bewegung weckt. Ob die Schwelle für sanftes Drehen der Münze reicht und ob Tischerschütterungen ungewollt wecken, ist nach Gefühl im Alltag abzustimmen (`ANYMOT_THRESHOLD`, `ANYMOT_DURATION`).
