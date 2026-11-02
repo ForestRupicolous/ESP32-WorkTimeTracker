@@ -482,6 +482,57 @@ static void test_daylog() {
   CHECK(strcmp(a2, a1) < 0);  // "ohne_zeit" kommt zuletzt
 }
 
+static void test_nodate_storage_wifi() {
+  // Summen ohne Datum: kein Tageswechsel, nur Sekunden
+  uint32_t s[kFaces] = {};
+  accrueRelative(s, 2, 100, 160);
+  accrueRelative(s, 2, 200, 215);
+  accrueRelative(s, 0, 300, 310);
+  CHECK(s[2] == 75 && s[0] == 10 && s[1] == 0);
+  accrueRelative(s, 2, 500, 500);   // leer
+  accrueRelative(s, 2, 600, 500);   // rueckwaerts
+  accrueRelative(s, -1, 0, 100);    // ungueltiges Projekt
+  accrueRelative(s, kFaces, 0, 100);
+  CHECK(s[2] == 75);
+  accrueRelative(s, kFaces - 1, 0, 3600);
+  CHECK(s[kFaces - 1] == 3600);
+  CHECK(kFaceRestart < kUnknown && kFaceTimeFound < kFaceRestart);  // verwechselbar mit keiner Seite
+
+  // Uhrensprung: Wanduhr minus ungestellte Uhr
+  CHECK(clockJumpMs(1000000000LL, 1010000000LL, 5000000LL, 15000000LL) == 0);          // keine Korrektur
+  CHECK(clockJumpMs(1000000000LL, 1015000000LL, 5000000LL, 15000000LL) == 5000);       // 5 s vor
+  CHECK(clockJumpMs(1793000000000000LL, 1792999760000000LL, 0, 10000000LL) == -250000);  // 250 s zurueck (Uhr ging vor)
+  CHECK(clockJumpMs(0, 100000000LL, 0, 99999000LL) == 1);                             // 1 ms
+
+  // Speicher: Prozent
+  CHECK(percentUsed(0, 1536000) == 0);
+  CHECK(percentUsed(1536000, 1536000) == 100);
+  CHECK(percentUsed(2000000, 1536000) == 100);  // mehr als total: 100
+  CHECK(percentUsed(5, 0) == 0);                // total unbekannt
+  CHECK(percentUsed(1382400, 1536000) == 90);   // genau 90 %
+  CHECK(percentUsed(1381000, 1536000) == 90);   // 89,9 % rundet auf 90
+  CHECK(percentUsed(1375000, 1536000) == 90);   // 89,5 % rundet auf 90
+  CHECK(percentUsed(1370000, 1536000) == 89);   // 89,2 % rundet auf 89
+  CHECK(percentUsed(20485, 1536000) == 1);
+
+  // WLAN-Versuchsreihenfolge
+  bool cfg3[3] = {true, true, true};
+  bool seenAll[3] = {true, true, true}, seen23[3] = {false, true, true}, seenNone[3] = {false, false, false};
+  int o[3];
+  CHECK(wifiTryOrder(cfg3, seenAll, 3, false, o) == 3 && o[0] == 0 && o[1] == 1 && o[2] == 2);
+  CHECK(wifiTryOrder(cfg3, seen23, 3, false, o) == 2 && o[0] == 1 && o[1] == 2);   // Netz 1 fehlt: weiter mit Netz 2
+  CHECK(wifiTryOrder(cfg3, seenNone, 3, false, o) == 0);                           // nichts in Reichweite: kein Versuch
+  CHECK(wifiTryOrder(cfg3, seenNone, 3, true, o) == 3 && o[0] == 0 && o[2] == 2);  // versteckte Netze: alle versuchen
+  bool cfg2[3] = {true, false, true};
+  CHECK(wifiTryOrder(cfg2, seenAll, 3, false, o) == 2 && o[0] == 0 && o[1] == 2);  // leerer Eintrag wird uebersprungen
+  CHECK(wifiTryOrder(cfg2, seenNone, 3, true, o) == 2 && o[0] == 0 && o[1] == 2);
+  bool cfg1[3] = {false, false, true};
+  bool seenOne[3] = {false, false, true};
+  CHECK(wifiTryOrder(cfg1, seenOne, 3, false, o) == 1 && o[0] == 2);
+  bool cfg0[3] = {false, false, false};
+  CHECK(wifiTryOrder(cfg0, seenAll, 3, true, o) == 0);
+}
+
 int main() {
   setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
   tzset();
@@ -498,6 +549,7 @@ int main() {
   test_csv();
   test_shake();
   test_daylog();
+  test_nodate_storage_wifi();
   printf("%d bestanden, %d fehlgeschlagen\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

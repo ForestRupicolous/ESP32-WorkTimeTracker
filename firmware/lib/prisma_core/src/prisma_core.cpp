@@ -339,6 +339,28 @@ time_t localMidnight(time_t t) {
   return mktime(&lt);
 }
 
+void accrueRelative(uint32_t sec[kFaces], int project, time_t from, time_t to) {
+  if (project < 0 || project >= kFaces || to <= from) return;
+  sec[project] += (uint32_t)(to - from);
+}
+
+int64_t clockJumpMs(int64_t wallUs0, int64_t wallUs1, int64_t monoUs0, int64_t monoUs1) {
+  return ((wallUs1 - wallUs0) - (monoUs1 - monoUs0)) / 1000;
+}
+
+int percentUsed(uint64_t used, uint64_t total) {
+  if (total == 0) return 0;
+  if (used >= total) return 100;
+  return (int)((used * 100 + total / 2) / total);
+}
+
+int wifiTryOrder(const bool configured[], const bool seen[], int n, bool anyHidden, int order[]) {
+  int k = 0;
+  for (int i = 0; i < n; ++i)
+    if (configured[i] && (seen[i] || anyHidden)) order[k++] = i;
+  return k;
+}
+
 const char* csvHeader() { return "zeit,epoch,seite,projekt,name,vbat_mv,zeit_ok\n"; }
 
 size_t formatCsvLine(char* buf, size_t n, time_t t, bool timeValid, int face, int project,

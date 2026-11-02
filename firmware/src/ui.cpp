@@ -95,7 +95,23 @@ void beepProject(int project) {
   waitTone();
 }
 
-void showProject(int project, const char* name, uint8_t rot, int32_t todaySec) {
+// Warnleiste am unteren Rand (schwarz, rote Schrift: auf jeder Projektfarbe lesbar), wenn der Log-Speicher fast voll ist
+static void drawStorageWarning(int fsPercent) {
+  if (fsPercent < FS_WARN_PERCENT) return;
+  auto& d = M5.Display;
+  const int h = 18;
+  d.fillRect(0, d.height() - h, d.width(), h, TFT_BLACK);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_RED);
+  d.setTextDatum(textdatum_t::middle_center);
+  const bool wide = d.width() >= 200;  // quer 240 px, aufgestellt hochkant 135 px
+  char s[40];
+  if (fsPercent >= FS_FULL_PERCENT) snprintf(s, sizeof s, wide ? "Speicher VOLL (%d%%)" : "VOLL %d%%", fsPercent);
+  else snprintf(s, sizeof s, wide ? "Speicher fast voll: %d%%" : "Speicher %d%%", fsPercent);
+  d.drawString(s, d.width() / 2, d.height() - h / 2);
+}
+
+void showProject(int project, const char* name, uint8_t rot, int32_t sec, bool noDate, int fsPercent) {
   setRotation(rot);
   on();
   auto& d = M5.Display;
@@ -104,16 +120,22 @@ void showProject(int project, const char* name, uint8_t rot, int32_t todaySec) {
   d.setTextDatum(textdatum_t::middle_center);
   d.setFont(&fonts::Font4);
   d.drawString(name, d.width() / 2, d.height() * 3 / 10);
-  // aufsummierte Zeit dieses Projekts heute, gross (ohne gueltige Uhrzeit "--:--")
+  // aufsummierte Zeit dieses Projekts (heute bzw. ohne Datum), gross
   char s[16];
-  if (todaySec >= 0) prisma::formatHM(s, sizeof s, (uint32_t)todaySec);
+  if (sec >= 0) prisma::formatHM(s, sizeof s, (uint32_t)sec);
   else snprintf(s, sizeof s, "--:--");
   d.setFont(&fonts::Font6);
   d.drawString(s, d.width() / 2, d.height() * 66 / 100);
+  if (noDate) {
+    d.setFont(&fonts::Font2);
+    d.setTextDatum(textdatum_t::top_left);
+    d.drawString("ohne Datum", 4, 2);
+  }
+  drawStorageWarning(fsPercent);
 }
 
-void showStatus(const prisma::DayTotals& tot, int currentProject, time_t since, time_t now,
-                bool timeValid, int vbatMv) {
+void showStatus(const uint32_t* sec, int currentProject, time_t since, time_t now, bool timeValid, int vbatMv,
+                int fsPercent) {
   setRotation(DISP_ROT_FLAT);
   on();
   auto& d = M5.Display;
@@ -122,7 +144,7 @@ void showStatus(const prisma::DayTotals& tot, int currentProject, time_t since, 
   d.setTextColor(TFT_WHITE);
   d.setTextDatum(textdatum_t::top_left);
   if (!timeValid) {
-    d.drawString("Zeit unbekannt", 2, 1);
+    d.drawString("Ohne Datum (Summe)", 2, 1);
   } else {
     char h[24];
     struct tm lt;
@@ -139,16 +161,18 @@ void showStatus(const prisma::DayTotals& tot, int currentProject, time_t since, 
   // Projekte in zwei Spalten
   const int n = prisma::kFaces - 1;
   const int rows = (n + 1) / 2;
-  const int rowH = (d.height() - 20) / rows > 20 ? 20 : (d.height() - 20) / rows;
+  const int avail = d.height() - 20 - (fsPercent >= FS_WARN_PERCENT ? 18 : 0);  // Platz fuer die Warnleiste lassen
+  const int rowH = avail / rows > 20 ? 20 : avail / rows;
   for (int p = 1; p <= n; ++p) {
-    uint32_t s = prisma::isSameDay(tot, now) ? tot.sec[p] : 0;
-    if (timeValid && p == currentProject && now > since) s += (uint32_t)(now - since);
+    uint32_t s = sec[p];
+    if (p == currentProject && since > 0 && now > since) s += (uint32_t)(now - since);
     prisma::formatHM(b, sizeof b, s);
     d.setTextColor(PROJECT_COLORS[p]);
     snprintf(line, sizeof line, "%2d %-7.7s%5s", p, PROJECT_NAMES[p], b);
     int col = (p - 1) / rows, row = (p - 1) % rows;
     d.drawString(line, 2 + col * 120, 20 + row * rowH);
   }
+  drawStorageWarning(fsPercent);
 }
 
 void showText(const char* l1, const char* l2, const char* l3) {

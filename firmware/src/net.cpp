@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_sntp.h>
 
 #include "config.h"
 #include "net.h"
@@ -10,13 +11,71 @@
 
 namespace {
 
-bool connect() {
+constexpr time_t kClockSane = 1704067200;  // 2024-01-01: aeltere Uhrzeiten gelten als nicht gestellt
+
+// getLocalTime() kehrt bei schon gueltiger Uhr sofort zurueck, ohne dass der NTP-Server geantwortet hat. Darum meldet
+// der SNTP-Dienst die erste Antwort selbst: dieses Flag wird gesetzt, sobald die Uhr gestellt wurde.
+volatile bool sntpDone = false;
+void onSntp(struct timeval*) { sntpDone = true; }
+
+// Netze in der Reihenfolge, in der sie versucht werden (Rangfolge = Reihenfolge in config.h). Bei mehreren Netzen wird vorher
+// einmal gescannt, damit nicht jedes abwesende Netz die ganze Wartezeit kostet (der WLAN-Stack meldet "Netz nicht gefunden"
+// nur kurz und startet gleich einen Wiederholversuch, der Status taugt nicht zum Umschalten). Versteckte Netze fehlen im
+// Scan: Sind welche in Reichweite, werden auch nicht gesehene Netze versucht. Rueckgabe: Anzahl der Versuche.
+int planNets(int order[WIFI_NET_COUNT]) {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  bool configured[WIFI_NET_COUNT], seen[WIFI_NET_COUNT];
+  int count = 0, first = -1;
+  for (int i = 0; i < WIFI_NET_COUNT; ++i) {
+    configured[i] = WIFI_NETS[i].ssid && WIFI_NETS[i].ssid[0];
+    seen[i] = false;
+    if (configured[i]) {
+      ++count;
+      if (first < 0) first = i;
+    }
+  }
+  if (count == 0) {
+    log_w("kein WLAN konfiguriert");
+    return 0;
+  }
+  bool hidden = false;
+  if (count == 1) {
+    seen[first] = true;  // ein einzelnes Netz wie bisher gleich versuchen, ohne Scan
+  } else {
+    int found = WiFi.scanNetworks(false, true, false, 120);
+    if (found < 0) {  // Scan fehlgeschlagen: nichts ausschliessen
+      for (int i = 0; i < WIFI_NET_COUNT; ++i) seen[i] = configured[i];
+    } else {
+      for (int r = 0; r < found; ++r) {
+        String s = WiFi.SSID(r);
+        if (s.length() == 0) {
+          hidden = true;
+          continue;
+        }
+        for (int i = 0; i < WIFI_NET_COUNT; ++i)
+          if (configured[i] && s == WIFI_NETS[i].ssid) seen[i] = true;
+      }
+    }
+    WiFi.scanDelete();
+    log_i("WLAN-Scan: %d Netze, gesehen: 1=%d 2=%d 3=%d, versteckte: %d", (int)found, (int)seen[0], (int)seen[1],
+          (int)seen[2], (int)hidden);
+  }
+  return prisma::wifiTryOrder(configured, seen, WIFI_NET_COUNT, hidden, order);
+}
+
+// Mit Netz i verbinden (hoechstens WIFI_TIMEOUT_MS), sonst die Verbindung wieder abbrechen
+bool connectNet(int i) {
+  WiFi.begin(WIFI_NETS[i].ssid, WIFI_NETS[i].pass);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TIMEOUT_MS) delay(50);
-  return WiFi.status() == WL_CONNECTED;
+  if (WiFi.status() == WL_CONNECTED) {
+    log_i("WLAN %d verbunden", i + 1);
+    return true;
+  }
+  log_w("WLAN %d nicht verbunden", i + 1);
+  WiFi.disconnect(false, false);
+  return false;
 }
 
 void disconnect() {
@@ -29,22 +88,39 @@ void disconnect() {
 namespace net {
 
 bool syncTime() {
-  if (!connect()) {
-    log_w("WLAN nicht erreichbar");
-    disconnect();
-    return false;
+  int order[WIFI_NET_COUNT];
+  const int tries = planNets(order);
+  for (int k = 0; k < tries; ++k) {
+    if (!connectNet(order[k])) continue;
+    const bool wasValid = time(nullptr) > kClockSane;
+    sntpDone = false;
+    sntp_set_time_sync_notification_cb(onSntp);
+    configTzTime(TZ_INFO, NTP_1, NTP_2);
+    uint32_t t0 = millis();
+    while (!sntpDone && millis() - t0 < 6000) delay(20);
+    // Ohne gueltige Uhr zaehlt auch eine gestellte Uhr ohne Meldung (wie bisher); mit gueltiger Uhr nur die NTP-Antwort
+    struct tm tm;
+    if (sntpDone || (!wasValid && getLocalTime(&tm, 0) && tm.tm_year > (2024 - 1900))) {
+      disconnect();
+      return true;
+    }
+    // verbunden, aber keine Uhrzeit (z. B. Anmeldeseite im Hotspot): mit dem naechsten Netz weiter
+    log_w("WLAN %d: keine Uhrzeit erhalten", order[k] + 1);
+    WiFi.disconnect(false, false);
   }
-  configTzTime(TZ_INFO, NTP_1, NTP_2);
-  struct tm tm;
-  bool ok = getLocalTime(&tm, 6000) && tm.tm_year > (2024 - 1900);
+  log_w("WLAN nicht erreichbar");
   disconnect();
-  return ok;
+  return false;
 }
 
 void serveExport(const std::function<String()>& statusHtml,
                  const std::function<bool()>& keepRunning,
                  const std::function<void(const char* ip)>& onReady) {
-  if (!connect()) {
+  int order[WIFI_NET_COUNT];
+  const int tries = planNets(order);
+  bool connected = false;
+  for (int k = 0; k < tries && !connected; ++k) connected = connectNet(order[k]);
+  if (!connected) {
     disconnect();
     onReady(nullptr);
     return;

@@ -8,6 +8,8 @@
 namespace store {
 
 bool begin();
+// Belegung des Log-Speichers in Prozent (LittleFS, Bloecke), 0 bei unbekannter Groesse
+int usedPercent();
 bool loadModel(prisma::FaceModel& m);
 bool saveModel(const prisma::FaceModel& m);
 

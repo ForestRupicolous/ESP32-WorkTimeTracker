@@ -11,6 +11,9 @@
 //   Taste A kurz: Tagesuebersicht | 2 s halten: WLAN-Export | 6 s halten: Teach-in
 #include <M5Unified.h>
 
+#include <esp_timer.h>
+#include <sys/time.h>
+
 #include <utility>
 #include <vector>
 
@@ -29,12 +32,14 @@ struct Persist {
   int8_t face;        // uebernommene Seite, kUnknown = Pause
   time_t since;       // Beginn des laufenden Abschnitts
   time_t lastSync;
+  time_t syncTryAt;   // Zeitpunkt des letzten erfolglosen Zeitabgleichs (Wiederholsperre SYNC_RETRY_SEC), 0 = keiner
   bool timeValid;
   uint8_t restless;   // Sitzungen in Folge ohne Ruhe (Tasche, Transport)
   DayTotals today;
+  uint32_t noDateSec[kFaces];  // Summen je Projekt ohne gueltige Uhrzeit (Zeit seit dem Start, kein Tageswechsel)
 };
 RTC_DATA_ATTR static Persist g;
-static constexpr uint32_t kMagic = 0x5A500300u | kFaces;  // Version 3 + Bauform
+static constexpr uint32_t kMagic = 0x5A500400u | kFaces;  // Version 4 + Bauform
 static_assert(sizeof(PROJECT_NAMES) / sizeof(PROJECT_NAMES[0]) >= kFaces,
               "zu wenige PROJECT_NAMES (config_local.h: PROJECT_NAMES_LOCAL braucht Pause + Projekte der Bauform)");
 static_assert(sizeof(PROJECT_COLORS) / sizeof(PROJECT_COLORS[0]) >= kFaces, "zu wenige PROJECT_COLORS");
@@ -53,22 +58,94 @@ static uint32_t awakeUntil = 0;  // Wachbleiben ohne Anzeige (Zeit zum Schuettel
 
 static time_t nowT() { return time(nullptr); }
 
+// Uhrenvergleich vor und nach einem NTP-Abgleich: Springt die Systemuhr (die Uhr im Schlaf geht ungenau, im Log vom 30.10.2026
+// ging sie ueber Nacht mehr als 4 Minuten vor), wird der laufende Abschnitt um den Sprung mitverschoben, sonst ginge seine
+// Dauer verloren oder waere um den Sprung falsch. Die Zeitstempel kurz vor dem Abgleich bleiben, wie sie sind.
+struct ClockMark {
+  int64_t wallUs, monoUs;
+};
+static ClockMark clockMark() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  return {(int64_t)tv.tv_sec * 1000000LL + tv.tv_usec, esp_timer_get_time()};
+}
+
 // Muenze aufgestellt: Text aufrecht drehen; sonst feste Lage
 static uint8_t rotationFor(int face, const Vec3& a) {
   if (!kCoin || face <= 0) return DISP_ROT_FLAT;
   return (uint8_t)((DISP_ROT_OFFSET + DISP_ROT_DIR * upQuadrant(a)) & 3);
 }
 
+// Belegung des Log-Speichers in Prozent, einmal je Wachabschnitt gelesen (sie aendert sich langsam)
+static int fsPercentNow() {
+  static int cached = -1;
+  if (cached < 0) {
+    cached = store::usedPercent();
+    if (cached >= FS_WARN_PERCENT) log_w("Speicher fast voll: %d %%", cached);
+  }
+  return cached;
+}
+
+// Summen, die gerade zaehlen (ohne den laufenden Abschnitt): heutige Summen, ohne Uhrzeit die Summen ohne Datum
+static void currentTotals(uint32_t out[kFaces], time_t now) {
+  if (!g.timeValid) {
+    memcpy(out, g.noDateSec, kFaces * sizeof(uint32_t));
+    return;
+  }
+  for (int p = 0; p < kFaces; ++p) out[p] = isSameDay(g.today, now) ? g.today.sec[p] : 0;
+}
+
+// Die Uhrzeit ist gerade gueltig geworden, waehrend ein Abschnitt ohne Datum lief (beim Wechsel oder im Export). Der
+// Abschnitt ohne Datum endet bei endRel (Zeit seit dem Start), der laufende Abschnitt geht ab jetzt mit Uhrzeit weiter.
+// Beides steht im Log: eine Ende-Zeile im Log ohne Uhrzeit und eine Fortsetzungszeile im Tageslog.
+static void timeFound(time_t endRel) {
+  const int p = projectForFace(g.face);
+  const int vbat = hal::batteryMv();
+  if (g.since > 0) accrueRelative(g.noDateSec, p, g.since, endRel);
+  store::appendEvent(endRel, false, kFaceTimeFound, 0, "Ende", vbat);
+  g.timeValid = true;
+  g.since = nowT();
+  store::appendEvent(g.since, true, g.face, p, PROJECT_NAMES[p], vbat);
+  log_i("Uhrzeit gefunden, Abschnitt ohne Datum beendet (Summe Projekt %d: %lu s)", p, (unsigned long)g.noDateSec[p]);
+}
+
+// Nach einem Abgleich bei gueltiger Uhr: Sprung messen, protokollieren und den laufenden Abschnitt mitnehmen
+static void followClockJump(const ClockMark& m0) {
+  const ClockMark m1 = clockMark();
+  const int64_t jumpMs = clockJumpMs(m0.wallUs, m1.wallUs, m0.monoUs, m1.monoUs);
+  log_i("Zeit abgeglichen: Korrektur %+lld ms", (long long)jumpMs);
+  const time_t jumpS = (time_t)(jumpMs / 1000);
+  if (jumpS != 0 && g.since > kEpochSane) g.since += jumpS;
+}
+
 static void maybeSync(bool force) {
-  if (!force && g.timeValid && nowT() - g.lastSync < (time_t)RESYNC_SEC) return;
+  const time_t now = nowT();
+  if (!force) {
+    if (g.timeValid && now - g.lastSync < (time_t)RESYNC_SEC) return;
+    // nach einem erfolglosen Versuch nicht bei jedem Wechsel erneut: Scan und Verbindungsversuch kosten Sekunden
+    if (g.syncTryAt > 0 && now >= g.syncTryAt && now - g.syncTryAt < (time_t)SYNC_RETRY_SEC) return;
+  }
+  const bool wasValid = g.timeValid;
+  const uint32_t ms0 = millis();
+  const ClockMark m0 = clockMark();
   if (net::syncTime()) {
-    g.timeValid = true;
     g.lastSync = nowT();
+    g.syncTryAt = 0;
+    if (!wasValid) {
+      if (g.since > 0) timeFound(now + (time_t)((millis() - ms0) / 1000));  // ein Abschnitt ohne Datum lief
+      else g.timeValid = true;  // Kaltstart: noch nichts gezaehlt
+    } else {
+      followClockJump(m0);
+    }
+  } else {
+    g.syncTryAt = nowT();
   }
 }
 
 static void showStatusNow(uint32_t ms = STATUS_SHOW_MS) {
-  ui::showStatus(g.today, projectForFace(g.face), g.since, nowT(), g.timeValid, hal::batteryMv());
+  uint32_t sec[kFaces];
+  currentTotals(sec, nowT());
+  ui::showStatus(sec, projectForFace(g.face), g.since, nowT(), g.timeValid, hal::batteryMv(), fsPercentNow());
   uiUntil = millis() + ms;
 }
 
@@ -76,29 +153,30 @@ static void showStatusNow(uint32_t ms = STATUS_SHOW_MS) {
 static void commit(int face, const Vec3& accel) {
   time_t now = nowT();
   // Abschnitt, der mit diesem Wechsel endet (fuer die Uebertragszeile, falls er ueber Mitternacht lief)
-  const bool hadSegment = g.timeValid && g.since > kEpochSane;
+  const bool dated = g.timeValid;
+  const bool hadSegment = dated ? g.since > kEpochSane : g.since > 0;
   const store::Carry carry{g.since, g.face, projectForFace(g.face), PROJECT_NAMES[projectForFace(g.face)]};
-  if (hadSegment) accrue(g.today, projectForFace(g.face), g.since, now);
+  if (hadSegment) {
+    if (dated) accrue(g.today, projectForFace(g.face), g.since, now);
+    else accrueRelative(g.noDateSec, projectForFace(g.face), g.since, now);  // ohne Uhrzeit zaehlt die Zeit seit dem Start
+  }
   g.face = (int8_t)face;
   g.since = now;
   int p = projectForFace(face);
   if (!store::appendEvent(now, g.timeValid, face, p, PROJECT_NAMES[p], hal::batteryMv(), hadSegment ? &carry : nullptr))
     log_e("Log schreiben fehlgeschlagen");
   log_i("Seite %d -> %s", face, PROJECT_NAMES[p]);
-  // aufsummierte Zeit des Projekts heute (die Summen beginnen mit jedem Tag bei 0); -1 = Uhrzeit unbekannt
-  int32_t todaySec = -1;
-  if (g.timeValid) todaySec = isSameDay(g.today, now) ? (int32_t)g.today.sec[p] : 0;
+  // aufsummierte Zeit des Projekts: heute (die Summen beginnen mit jedem Tag bei 0), ohne Uhrzeit die Summe ohne Datum
+  const int32_t shownSec = dated ? (isSameDay(g.today, now) ? (int32_t)g.today.sec[p] : 0) : (int32_t)g.noDateSec[p];
 
   ui::startProjectTone(p);  // der Ton laeuft im Hintergrund, waehrend die Anzeige aufgebaut wird
   if (face == 0) {
     showStatusNow();
   } else if (displayVisible(face)) {  // sonst zeigt das Display Richtung Tisch
-    ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel), todaySec);
+    ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel), shownSec, !dated, fsPercentNow());
     uiUntil = millis() + PROJECT_SHOW_MS;
   }
-  bool wasValid = g.timeValid;
   maybeSync(false);
-  if (!wasValid && g.timeValid) g.since = nowT();  // erst ab jetzt sinnvoll zaehlbar
   ui::waitTone();  // nicht mitten im Ton schlafen gehen
 }
 
@@ -165,20 +243,25 @@ static void teachIn() {
 static String statusHtml() {
   String h = F("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
                "<title>Zeitprisma</title><body style='font-family:sans-serif;max-width:30em;margin:1em auto'>"
-               "<h2>Zeitprisma</h2><table>");
+               "<h2>Zeitprisma</h2>");
+  if (!g.timeValid) h += F("<p>Keine Uhrzeit: Summen ohne Datum seit dem Start</p>");
+  h += F("<table>");
   time_t now = nowT();
   char b[16];
+  uint32_t base[kFaces];
+  currentTotals(base, now);
   for (int p = 1; p < kFaces; ++p) {
-    uint32_t s = isSameDay(g.today, now) ? g.today.sec[p] : 0;
-    if (p == projectForFace(g.face) && g.timeValid) s += (uint32_t)(now - g.since);
+    uint32_t s = base[p];
+    if (p == projectForFace(g.face) && g.since > 0 && now > g.since) s += (uint32_t)(now - g.since);
     formatHM(b, sizeof b, s);
     h += "<tr><td>" + String(p) + "</td><td>" + PROJECT_NAMES[p] + "</td><td align=right>" + b + "</td></tr>";
   }
-  char tail[200];
+  char tail[260];
   snprintf(tail, sizeof tail,
-           "</table><p>Aktiv: %s<br>Akku: %.2f V<br>Logs: %u Bytes</p>"
+           "</table><p>Aktiv: %s<br>Akku: %.2f V<br>Logs: %u Bytes, Speicher %d %% belegt%s</p>"
            "<p><a href='/log.csv'>Alle Tage (log.csv)</a></p><p>Ein Tag:<br>",
-           PROJECT_NAMES[projectForFace(g.face)], hal::batteryMv() / 1000.f, (unsigned)store::logSize());
+           PROJECT_NAMES[projectForFace(g.face)], hal::batteryMv() / 1000.f, (unsigned)store::logSize(), fsPercentNow(),
+           fsPercentNow() >= FS_WARN_PERCENT ? " (fast voll!)" : "");
   h += tail;
   // neueste zuerst, hoechstens 60 (alle stehen in log.csv)
   std::vector<std::pair<String, size_t>> logs;
@@ -192,6 +275,10 @@ static String statusHtml() {
 }
 
 static void webExport() {
+  const time_t relBefore = nowT();  // fuer den Uebergang ohne Datum -> mit Uhrzeit, falls der Export die Zeit holt
+  const uint32_t ms0 = millis();
+  const ClockMark m0 = clockMark();
+  bool connected = false;
   ui::setRotation(DISP_ROT_FLAT);
   ui::showText("WLAN-Export", "verbinde ...");
   bool stop = false;
@@ -211,11 +298,17 @@ static void webExport() {
         }
         ui::showText("WLAN-Export", "http://" MDNS_NAME ".local", ip);
         ui::longBeep();
+        connected = true;
       });
   if (nowT() > kEpochSane && !g.timeValid) {  // Export hat nebenbei NTP geholt
-    g.timeValid = true;
     g.lastSync = nowT();
-    g.since = nowT();
+    g.syncTryAt = 0;
+    if (g.since > 0) timeFound(relBefore + (time_t)((millis() - ms0) / 1000));  // ein Abschnitt ohne Datum lief
+    else g.timeValid = true;
+  } else if (g.timeValid && connected) {  // der Export hat die Uhr (asynchron) gestellt: Sprung mitnehmen
+    g.lastSync = nowT();
+    g.syncTryAt = 0;
+    followClockJump(m0);
   }
   showStatusNow(3000);
 }
@@ -280,6 +373,10 @@ void setup() {
   if (cold) {
     ui::showText("Zeitprisma", "hole Uhrzeit ...");
     maybeSync(true);
+    if (!g.timeValid) {  // keine Uhrzeit: die Zaehlung laeuft ohne Datum, die Zeitbasis beginnt neu
+      log_w("Keine Uhrzeit gefunden: Zaehlung ohne Datum");
+      store::appendEvent(nowT(), false, kFaceRestart, 0, "Neustart", hal::batteryMv());
+    }
     if (!model.valid) teachIn();
     showStatusNow(5000);
   } else if (hal::wokeByButton()) {

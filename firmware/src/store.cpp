@@ -19,6 +19,8 @@ bool begin() {
   return LittleFS.begin(true);
 }
 
+int usedPercent() { return prisma::percentUsed(LittleFS.usedBytes(), LittleFS.totalBytes()); }
+
 bool loadModel(prisma::FaceModel& m) {
   Preferences p;
   if (!p.begin(kNs, true)) return false;

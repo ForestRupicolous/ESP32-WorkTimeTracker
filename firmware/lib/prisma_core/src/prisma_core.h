@@ -205,4 +205,28 @@ void dayLogPath(char* buf, size_t n, time_t t, bool timeValid);
 // lokale Mitternacht (00:00:00) des Tages von t
 time_t localMidnight(time_t t);
 
+// ---------------------------------------------------------------- Ohne Uhrzeit
+// Ohne gueltige Uhrzeit laeuft die Zaehlung mit der Zeit seit dem Start weiter (time() zaehlt auch im Deep Sleep). Die
+// Summen ohne Datum sind Sekunden je Projekt ohne Tageswechsel.
+void accrueRelative(uint32_t sec[kFaces], int project, time_t from, time_t to);
+// Besondere Werte in der Spalte "seite" im Log ohne Uhrzeit (projekt ist dort 0, es ist kein Projektwechsel):
+constexpr int kFaceRestart = -2;    // Neustart: die Zeitbasis beginnt neu, ein offener Abschnitt davor ist beendet
+constexpr int kFaceTimeFound = -3;  // Uhrzeit gefunden: der Abschnitt davor endet hier, danach steht alles im Tageslog
+
+// ---------------------------------------------------------------- Uhrensprung
+// Sprung der Systemuhr (z. B. durch einen NTP-Abgleich) zwischen zwei Messungen in ms: Aenderung der Wanduhr minus
+// Aenderung einer ungestellten, monotonen Uhr (esp_timer), beide in Mikrosekunden. Positiv = die Wanduhr ging vor.
+int64_t clockJumpMs(int64_t wallUs0, int64_t wallUs1, int64_t monoUs0, int64_t monoUs1);
+
+// ---------------------------------------------------------------- Speicher
+// Belegung in Prozent (auf ganze Prozent gerundet, 0 bei total == 0, hoechstens 100)
+int percentUsed(uint64_t used, uint64_t total);
+
+// ---------------------------------------------------------------- WLAN-Auswahl
+// Reihenfolge der Verbindungsversuche bei n konfigurierten Netzen (Rangfolge = Index). configured[i]: Eintrag nicht leer,
+// seen[i]: das Netz wurde im Scan gesehen, anyHidden: der Scan sah versteckte Netze (deren Name fehlt im Scan, darum
+// werden dann auch nicht gesehene Netze versucht). Schreibt die Indizes nach order[] (mindestens n Plaetze), liefert die
+// Anzahl der Versuche.
+int wifiTryOrder(const bool configured[], const bool seen[], int n, bool anyHidden, int order[]);
+
 }  // namespace prisma

@@ -92,11 +92,32 @@ static const uint16_t PROJECT_TONES_HZ[] = {
 #ifndef WIFI_PASS
 #define WIFI_PASS        "dein-passwort"
 #endif
+// Weitere Netze (optional, z. B. 1 = zu Hause, 2 = Arbeit, 3 = unterwegs). Die Reihenfolge ist die Rangfolge: Der Stick nimmt
+// das erste Netz, das in Reichweite ist und sich verbinden laesst, sonst das naechste. Leere SSID = Eintrag aus.
+#ifndef WIFI_SSID_2
+#define WIFI_SSID_2      ""
+#endif
+#ifndef WIFI_PASS_2
+#define WIFI_PASS_2      ""
+#endif
+#ifndef WIFI_SSID_3
+#define WIFI_SSID_3      ""
+#endif
+#ifndef WIFI_PASS_3
+#define WIFI_PASS_3      ""
+#endif
+struct WifiNet {
+  const char* ssid;
+  const char* pass;
+};
+static const WifiNet WIFI_NETS[] = {{WIFI_SSID, WIFI_PASS}, {WIFI_SSID_2, WIFI_PASS_2}, {WIFI_SSID_3, WIFI_PASS_3}};
+#define WIFI_NET_COUNT   3
 #define TZ_INFO          "CET-1CEST,M3.5.0,M10.5.0/3"   // Wien
 #define NTP_1            "at.pool.ntp.org"
 #define NTP_2            "pool.ntp.org"
 #define RESYNC_SEC       (6UL * 3600UL)   // bei Ereignis neu syncen, wenn letzter Sync aelter
-#define WIFI_TIMEOUT_MS  8000
+#define SYNC_RETRY_SEC   (10UL * 60UL)    // nach einem erfolglosen Abgleich bei einem Wechsel fruehestens nach dieser Zeit erneut
+#define WIFI_TIMEOUT_MS  8000             // je Netz
 #define MDNS_NAME        "zeitprisma"      // http://zeitprisma.local
 #define WEB_TIMEOUT_MS   (5UL * 60UL * 1000UL)
 
@@ -122,6 +143,11 @@ static const uint16_t PROJECT_TONES_HZ[] = {
 #define RING_UPRIGHT_EXIT_DEG prisma::kUprightExitDeg  // Verbleib: bis 45 Grad
 #define FLAT_DEG              prisma::kFlatDeg         // Muenze auf dem Ruecken (Seite 0): bis 30 Grad von "Display oben"
 #define FLAT_EXIT_DEG         prisma::kFlatExitDeg     // ... behalten bis 40 Grad
+
+// ---------------------------------------------------------------- Speicher
+// Belegung des Log-Speichers (LittleFS) in Prozent, ab der das Display eine Warnung zeigt; ab FS_FULL_PERCENT "VOLL"
+#define FS_WARN_PERCENT  90
+#define FS_FULL_PERCENT  98
 
 // ---------------------------------------------------------------- Strom
 // 1 = Deep Sleep, Aufwachen per IMU-Bewegungsinterrupt ueber M5PM1 (sparsam)

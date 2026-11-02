@@ -7,6 +7,14 @@
 #pragma once
 #define WIFI_SSID        "dein-wlan"
 #define WIFI_PASS        "dein-passwort"
+// Weitere WLAN-Netze (optional): oben steht Netz 1 (zu Hause), hier Netz 2 (Arbeit) und Netz 3 (unterwegs, z. B. Handy-Hotspot).
+// Die Reihenfolge ist die Rangfolge: Der Stick nimmt das erste Netz, das in Reichweite ist und sich verbinden laesst.
+// Zeilen weglassen oder die SSID leer lassen = Eintrag aus. Nur 2,4-GHz-Netze.
+#define WIFI_SSID_2      ""
+#define WIFI_PASS_2      ""
+#define WIFI_SSID_3      ""
+#define WIFI_PASS_3      ""
+
 
 // Projektnamen (optional). Index = Seite: Eintrag 0 = Pause, danach Projekt 1, 2, ...
 // Mindestens so viele Eintraege, wie die Bauform Seiten hat (Muenze 8: 9, Muenze 12: 13, Prisma 10: 10), mehr sind
