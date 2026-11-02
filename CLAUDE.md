@@ -4,6 +4,8 @@
 - Antworten auf Deutsch, kurz und präzise. Einschränkungen und Voraussetzungen zuerst nennen.
 - Realistisch bewerten (Praxistauglichkeit), nicht nur Datenblattwerte. Unsicheres als unsicher kennzeichnen.
 - Nichts als „getestet“ bezeichnen, was nur gegen Stubs oder am PC geprüft wurde.
+- **Flashen mit „bereit“:** Ein schlafender Stick hat keinen USB-Port. Den Fänger (`tools/flash_und_log.sh`) erst starten, wenn der Nutzer „bereit“ schreibt (Stick am USB), dann sofort „jetzt bewegen“ sagen. Jeder weitere Flash braucht ein neues „bereit“.
+- `firmware/include/config_local.h` (echte Zugangsdaten und Namen) ändere ich nur auf ausdrückliche Anweisung, vorher Sicherung im Scratchpad, danach zurücksetzen. Werte nie ausgeben (Skript, das nur Struktur zeigt), nie in getrackte Dateien.
 
 ## Ziel und Bauform
 TimeFlip-artiger Zeiterfasser. **Standard: 8-Eck-„Münze“**, 53,8 mm Schlüsselweite, 22 mm dick. Der StickS3 liegt flach in einer Tasche, das Display zeigt nach vorne (1,5 mm vertieft).
@@ -48,6 +50,8 @@ gehaeuse/*.stl, *.png        zeitprisma_muenze8_22mm_usb.stl, vorschau_muenze8.p
 Makefile                     test | build | flash | log | ref | gehaeuse | alle-gehaeuse | clean (löscht auch firmware/.pio!)
 tools/auswertung.py          CSV → Stunden je Projekt/Tag/Woche
 tools/seriallog.py           serielle Ausgabe nicht-interaktiv mitschreiben (verbindet nach Deep Sleep neu)
+tools/stick_fangen.sh        schlafenden Stick im Wachfenster in den Bootloader setzen (Stick muss bewegt werden)
+tools/flash_und_log.sh       fangen, flashen, Watchdog-Reset, Mitschnitt (-n = NVS sichern und löschen); Ablauf mit „bereit“ (siehe Zusammenarbeit)
 ```
 
 ## Befehle
