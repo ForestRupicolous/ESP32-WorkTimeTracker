@@ -5,6 +5,8 @@
 #include <WiFi.h>
 #include <esp_sntp.h>
 
+#include <atomic>
+
 #include "config.h"
 #include "net.h"
 #include "store.h"
@@ -16,7 +18,16 @@ constexpr time_t kClockSane = 1704067200;  // 2024-01-01: aeltere Uhrzeiten gelt
 // getLocalTime() kehrt bei schon gueltiger Uhr sofort zurueck, ohne dass der NTP-Server geantwortet hat. Darum meldet
 // der SNTP-Dienst die erste Antwort selbst: dieses Flag wird gesetzt, sobald die Uhr gestellt wurde.
 volatile bool sntpDone = false;
-void onSntp(struct timeval*) { sntpDone = true; }
+std::atomic<bool> clockSet{false};  // der SNTP-Dienst hat die Uhr gestellt (fuer die Hauptschleife, siehe takeClockSet())
+void onSntp(struct timeval*) {
+  sntpDone = true;
+  clockSet = true;
+}
+
+// Zustand der Hintergrund-Task: 0 frei, 1 laeuft, 2 fertig mit Uhrzeit, 3 fertig ohne Uhrzeit
+std::atomic<int> jobState{0};
+std::atomic<bool> cancelJob{false};
+TaskHandle_t jobTask = nullptr;
 
 // Netze in der Reihenfolge, in der sie versucht werden (Rangfolge = Reihenfolge in config.h). Bei mehreren Netzen wird vorher
 // einmal gescannt, damit nicht jedes abwesende Netz die ganze Wartezeit kostet (der WLAN-Stack meldet "Netz nicht gefunden"
@@ -68,7 +79,7 @@ int planNets(int order[WIFI_NET_COUNT]) {
 bool connectNet(int i) {
   WiFi.begin(WIFI_NETS[i].ssid, WIFI_NETS[i].pass);
   uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TIMEOUT_MS) delay(50);
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TIMEOUT_MS && !cancelJob) delay(50);
   if (WiFi.status() == WL_CONNECTED) {
     log_i("WLAN %d verbunden", i + 1);
     return true;
@@ -83,34 +94,81 @@ void disconnect() {
   WiFi.mode(WIFI_OFF);
 }
 
-}  // namespace
-
-namespace net {
-
-bool syncTime() {
+// Der eigentliche Abgleich, blockierend; laeuft nur in der Hintergrund-Task
+bool syncBlocking() {
   int order[WIFI_NET_COUNT];
   const int tries = planNets(order);
-  for (int k = 0; k < tries; ++k) {
+  for (int k = 0; k < tries && !cancelJob; ++k) {
     if (!connectNet(order[k])) continue;
     const bool wasValid = time(nullptr) > kClockSane;
     sntpDone = false;
     sntp_set_time_sync_notification_cb(onSntp);
     configTzTime(TZ_INFO, NTP_1, NTP_2);
     uint32_t t0 = millis();
-    while (!sntpDone && millis() - t0 < 6000) delay(20);
+    while (!sntpDone && millis() - t0 < 6000 && !cancelJob) delay(20);
     // Ohne gueltige Uhr zaehlt auch eine gestellte Uhr ohne Meldung (wie bisher); mit gueltiger Uhr nur die NTP-Antwort
     struct tm tm;
     if (sntpDone || (!wasValid && getLocalTime(&tm, 0) && tm.tm_year > (2024 - 1900))) {
       disconnect();
       return true;
     }
+    if (cancelJob) break;
     // verbunden, aber keine Uhrzeit (z. B. Anmeldeseite im Hotspot): mit dem naechsten Netz weiter
     log_w("WLAN %d: keine Uhrzeit erhalten", order[k] + 1);
     WiFi.disconnect(false, false);
   }
-  log_w("WLAN nicht erreichbar");
+  if (!cancelJob) log_w("WLAN nicht erreichbar");
   disconnect();
   return false;
+}
+
+void jobMain(void*) {
+  const bool ok = syncBlocking();
+  jobState = ok ? 2 : 3;
+  vTaskDelete(nullptr);
+}
+
+}  // namespace
+
+namespace net {
+
+bool syncStart() {
+  if (jobState == 1) return false;
+  cancelJob = false;
+  clockSet = false;
+  jobState = 1;
+  // Core 0 wie der WLAN-Stack; die Arduino-Schleife laeuft auf Core 1 und tastet weiter ab
+  if (xTaskCreatePinnedToCore(jobMain, "wlan_sync", 8192, nullptr, 1, &jobTask, 0) != pdPASS) {
+    jobState = 0;
+    log_e("WLAN-Task nicht gestartet");
+    return false;
+  }
+  return true;
+}
+
+bool syncRunning() { return jobState == 1; }
+
+bool takeClockSet() { return clockSet.exchange(false); }
+
+bool syncFinished(bool* ok) {
+  const int s = jobState;
+  if (s < 2) return false;
+  if (ok) *ok = (s == 2);
+  jobState = 0;
+  return true;
+}
+
+void syncCancel() {
+  if (jobState != 1) return;
+  cancelJob = true;
+  const uint32_t t0 = millis();
+  while (jobState == 1 && millis() - t0 < 12000) delay(20);  // der Scan laesst sich nicht abbrechen
+  if (jobState == 1) {  // haengt: letzter Ausweg
+    vTaskDelete(jobTask);
+    disconnect();
+    jobState = 3;
+    log_e("WLAN-Task abgebrochen (Zeitlimit)");
+  }
 }
 
 void serveExport(const std::function<String()>& statusHtml,

@@ -37,9 +37,10 @@ struct Persist {
   uint8_t restless;   // Sitzungen in Folge ohne Ruhe (Tasche, Transport)
   DayTotals today;
   uint32_t noDateSec[kFaces];  // Summen je Projekt ohne gueltige Uhrzeit (Zeit seit dem Start, kein Tageswechsel)
+  bool noDateOpen;    // im Log ohne Uhrzeit steht eine Neustart-Zeile ohne Ende-Zeile
 };
 RTC_DATA_ATTR static Persist g;
-static constexpr uint32_t kMagic = 0x5A500400u | kFaces;  // Version 4 + Bauform
+static constexpr uint32_t kMagic = 0x5A500500u | kFaces;  // Version 5 + Bauform
 static_assert(sizeof(PROJECT_NAMES) / sizeof(PROJECT_NAMES[0]) >= kFaces,
               "zu wenige PROJECT_NAMES (config_local.h: PROJECT_NAMES_LOCAL braucht Pause + Projekte der Bauform)");
 static_assert(sizeof(PROJECT_COLORS) / sizeof(PROJECT_COLORS[0]) >= kFaces, "zu wenige PROJECT_COLORS");
@@ -56,7 +57,20 @@ static uint32_t sessionStart = 0;
 static uint32_t uiUntil = 0;  // solange etwas angezeigt wird, nicht schlafen
 static uint32_t awakeUntil = 0;  // Wachbleiben ohne Anzeige (Zeit zum Schuetteln nach dem Wecken im Liegen)
 
-static time_t nowT() { return time(nullptr); }
+// Zeit seit dem Start bei Beginn eines Abgleichs ohne Uhrzeit (mono = 0: kein Abgleich ohne Uhrzeit unterwegs)
+static struct {
+  time_t rel;
+  int64_t mono;
+} relMark = {0, 0};
+
+static time_t nowT() {
+  const time_t t = time(nullptr);
+  // Ohne Uhrzeit zaehlt die Zeit seit dem Start. Stellt der Abgleich im Hintergrund die Uhr, bevor die Schleife es
+  // uebernommen hat, laeuft die Zeit seit dem Start bis dahin weiter (sonst waere ein Abschnitt Jahrzehnte lang)
+  if (!g.timeValid && t > kEpochSane && relMark.mono != 0)
+    return relMark.rel + (time_t)((esp_timer_get_time() - relMark.mono) / 1000000);
+  return t;
+}
 
 // Uhrenvergleich vor und nach einem NTP-Abgleich: Springt die Systemuhr (die Uhr im Schlaf geht ungenau, im Log vom 30.10.2026
 // ging sie ueber Nacht mehr als 4 Minuten vor), wird der laufende Abschnitt um den Sprung mitverschoben, sonst ginge seine
@@ -95,17 +109,21 @@ static void currentTotals(uint32_t out[kFaces], time_t now) {
   for (int p = 0; p < kFaces; ++p) out[p] = isSameDay(g.today, now) ? g.today.sec[p] : 0;
 }
 
-// Die Uhrzeit ist gerade gueltig geworden, waehrend ein Abschnitt ohne Datum lief (beim Wechsel oder im Export). Der
-// Abschnitt ohne Datum endet bei endRel (Zeit seit dem Start), der laufende Abschnitt geht ab jetzt mit Uhrzeit weiter.
-// Beides steht im Log: eine Ende-Zeile im Log ohne Uhrzeit und eine Fortsetzungszeile im Tageslog.
+// Die Uhrzeit ist gerade gueltig geworden, nachdem Zeit ohne Datum gezaehlt wurde. Der Abschnitt ohne Datum endet bei
+// endRel (Zeit seit dem Start), ein laufender Abschnitt geht ab jetzt mit Uhrzeit weiter. Beides steht im Log: eine
+// Ende-Zeile im Log ohne Uhrzeit und, wenn ein Abschnitt lief, eine Fortsetzungszeile im Tageslog.
 static void timeFound(time_t endRel) {
   const int p = projectForFace(g.face);
   const int vbat = hal::batteryMv();
-  if (g.since > 0) accrueRelative(g.noDateSec, p, g.since, endRel);
+  const bool running = g.since > 0;
+  if (running) accrueRelative(g.noDateSec, p, g.since, endRel);
   store::appendEvent(endRel, false, kFaceTimeFound, 0, "Ende", vbat);
   g.timeValid = true;
-  g.since = nowT();
-  store::appendEvent(g.since, true, g.face, p, PROJECT_NAMES[p], vbat);
+  g.noDateOpen = false;
+  if (running) {
+    g.since = nowT();
+    store::appendEvent(g.since, true, g.face, p, PROJECT_NAMES[p], vbat);
+  }
   log_i("Uhrzeit gefunden, Abschnitt ohne Datum beendet (Summe Projekt %d: %lu s)", p, (unsigned long)g.noDateSec[p]);
 }
 
@@ -118,42 +136,106 @@ static void followClockJump(const ClockMark& m0) {
   if (jumpS != 0 && g.since > kEpochSane) g.since += jumpS;
 }
 
-static void maybeSync(bool force) {
-  const time_t now = nowT();
-  if (!force) {
-    if (g.timeValid && now - g.lastSync < (time_t)RESYNC_SEC) return;
-    // nach einem erfolglosen Versuch nicht bei jedem Wechsel erneut: Scan und Verbindungsversuch kosten Sekunden
-    if (g.syncTryAt > 0 && now >= g.syncTryAt && now - g.syncTryAt < (time_t)SYNC_RETRY_SEC) return;
-  }
-  const bool wasValid = g.timeValid;
-  const uint32_t ms0 = millis();
-  const ClockMark m0 = clockMark();
-  if (net::syncTime()) {
-    g.lastSync = nowT();
-    g.syncTryAt = 0;
-    if (!wasValid) {
-      if (g.since > 0) timeFound(now + (time_t)((millis() - ms0) / 1000));  // ein Abschnitt ohne Datum lief
-      else g.timeValid = true;  // Kaltstart: noch nichts gezaehlt
-    } else {
-      followClockJump(m0);
-    }
-  } else {
-    g.syncTryAt = nowT();
-  }
-}
+static bool statusShown = false;  // die Uebersicht ist gerade zu sehen (wird nachgezogen, wenn die Uhrzeit kommt)
 
 static void showStatusNow(uint32_t ms = STATUS_SHOW_MS) {
   uint32_t sec[kFaces];
   currentTotals(sec, nowT());
   ui::showStatus(sec, projectForFace(g.face), g.since, nowT(), g.timeValid, hal::batteryMv(), fsPercentNow());
   uiUntil = millis() + ms;
+  statusShown = true;
+}
+
+// ---------------------------------------------------------------- Zeitabgleich im Hintergrund
+// Scan, Verbindung und NTP laufen in einer eigenen Task (net::syncStart); die Schleife tastet weiter ab und zaehlt weiter.
+// pollSync() uebernimmt das Ergebnis: sofort, wenn die Uhr gestellt wurde, und am Ende der Task.
+static bool syncPending = false;       // eine Task laeuft, ihr Ergebnis steht noch aus
+static bool syncClockHandled = false;  // die gestellte Uhr ist schon uebernommen
+static bool syncWasValid = false;      // die Uhr war beim Start des Abgleichs schon gueltig
+static ClockMark syncM0;
+static uint32_t syncStartMs = 0;
+static constexpr uint32_t kSyncMaxMs = 60000;  // laenger darf die Task nicht wach halten
+
+// Beginn der Zaehlung ohne Datum im Log ohne Uhrzeit festhalten (einmal je Zeitraum ohne Uhrzeit)
+static void openNoDate() {
+  if (g.noDateOpen) return;
+  g.noDateOpen = true;
+  store::appendEvent(nowT(), false, kFaceRestart, 0, "Neustart", hal::batteryMv());
+}
+
+static void startSync(bool force) {
+  if (syncPending) return;
+  const time_t now = nowT();
+  if (!force) {
+    if (g.timeValid && now - g.lastSync < (time_t)RESYNC_SEC) return;
+    // nach einem erfolglosen Versuch nicht bei jedem Wechsel erneut: Scan und Verbindungsversuch kosten Sekunden
+    if (g.syncTryAt > 0 && now >= g.syncTryAt && now - g.syncTryAt < (time_t)SYNC_RETRY_SEC) return;
+  }
+  syncWasValid = g.timeValid;
+  syncClockHandled = false;
+  syncM0 = clockMark();
+  syncStartMs = millis();
+  if (!g.timeValid) relMark = {time(nullptr), esp_timer_get_time() | 1};
+  if (net::syncStart()) {
+    syncPending = true;
+  } else {
+    relMark.mono = 0;
+    g.syncTryAt = now;
+  }
+}
+
+// Der SNTP-Dienst hat die Uhr gestellt: Uebergang ohne Datum -> mit Uhrzeit oder Sprung der Uhr mitnehmen
+static void clockSetNow() {
+  syncClockHandled = true;
+  g.lastSync = time(nullptr);
+  g.syncTryAt = 0;
+  if (!syncWasValid) {
+    if (g.since > 0 || g.noDateOpen) timeFound(nowT());  // Zeit ohne Datum lief
+    else g.timeValid = true;                              // Kaltstart: noch nichts gezaehlt
+  } else {
+    followClockJump(syncM0);
+  }
+  relMark.mono = 0;
+  if (statusShown && (int32_t)(uiUntil - millis()) > 0) showStatusNow(uiUntil - millis());  // "ohne Datum" nachziehen
+}
+
+// Die Task ist zu Ende (ok: Uhrzeit erhalten) oder wurde abgebrochen
+static void finishSync(bool ok, bool cancelled) {
+  syncPending = false;
+  if (!syncClockHandled && (ok || (!syncWasValid && time(nullptr) > kEpochSane))) clockSetNow();
+  relMark.mono = 0;
+  if (!syncClockHandled && !cancelled) {
+    g.syncTryAt = nowT();
+    if (!g.timeValid) {
+      log_w("Keine Uhrzeit gefunden: Zaehlung ohne Datum");
+      openNoDate();
+    }
+  }
+}
+
+static void abortSync(bool cancelled) {
+  if (!syncPending) return;
+  net::syncCancel();
+  bool ok = false;
+  net::syncFinished(&ok);
+  finishSync(ok, cancelled);
+}
+
+static void pollSync() {
+  if (!syncPending) return;
+  if (!syncClockHandled && net::takeClockSet()) clockSetNow();
+  bool ok;
+  if (net::syncFinished(&ok)) finishSync(ok, false);
+  else if (millis() - syncStartMs > kSyncMaxMs) abortSync(false);
 }
 
 // ---------------------------------------------------------------- Ereignis
 static void commit(int face, const Vec3& accel) {
+  pollSync();  // eine inzwischen gestellte Uhr zuerst uebernehmen
   time_t now = nowT();
   // Abschnitt, der mit diesem Wechsel endet (fuer die Uebertragszeile, falls er ueber Mitternacht lief)
   const bool dated = g.timeValid;
+  if (!dated) openNoDate();
   const bool hadSegment = dated ? g.since > kEpochSane : g.since > 0;
   const store::Carry carry{g.since, g.face, projectForFace(g.face), PROJECT_NAMES[projectForFace(g.face)]};
   if (hadSegment) {
@@ -175,8 +257,9 @@ static void commit(int face, const Vec3& accel) {
   } else if (displayVisible(face)) {  // sonst zeigt das Display Richtung Tisch
     ui::showProject(p, PROJECT_NAMES[p], rotationFor(face, accel), shownSec, !dated, fsPercentNow());
     uiUntil = millis() + PROJECT_SHOW_MS;
+    statusShown = false;
   }
-  maybeSync(false);
+  startSync(false);
   ui::waitTone();  // nicht mitten im Ton schlafen gehen
 }
 
@@ -275,6 +358,7 @@ static String statusHtml() {
 }
 
 static void webExport() {
+  abortSync(true);  // der Export braucht die WLAN-Schnittstelle selbst
   const time_t relBefore = nowT();  // fuer den Uebergang ohne Datum -> mit Uhrzeit, falls der Export die Zeit holt
   const uint32_t ms0 = millis();
   const ClockMark m0 = clockMark();
@@ -300,10 +384,10 @@ static void webExport() {
         ui::longBeep();
         connected = true;
       });
-  if (nowT() > kEpochSane && !g.timeValid) {  // Export hat nebenbei NTP geholt
-    g.lastSync = nowT();
+  if (time(nullptr) > kEpochSane && !g.timeValid) {  // Export hat nebenbei NTP geholt
+    g.lastSync = time(nullptr);
     g.syncTryAt = 0;
-    if (g.since > 0) timeFound(relBefore + (time_t)((millis() - ms0) / 1000));  // ein Abschnitt ohne Datum lief
+    if (g.since > 0 || g.noDateOpen) timeFound(relBefore + (time_t)((millis() - ms0) / 1000));  // Zeit ohne Datum lief
     else g.timeValid = true;
   } else if (g.timeValid && connected) {  // der Export hat die Uhr (asynchron) gestellt: Sprung mitnehmen
     g.lastSync = nowT();
@@ -371,12 +455,8 @@ void setup() {
         (unsigned)(tStore - tHal), ownImu ? "eigen" : "M5");
 
   if (cold) {
-    ui::showText("Zeitprisma", "hole Uhrzeit ...");
-    maybeSync(true);
-    if (!g.timeValid) {  // keine Uhrzeit: die Zaehlung laeuft ohne Datum, die Zeitbasis beginnt neu
-      log_w("Keine Uhrzeit gefunden: Zaehlung ohne Datum");
-      store::appendEvent(nowT(), false, kFaceRestart, 0, "Neustart", hal::batteryMv());
-    }
+    // Uhrzeit im Hintergrund holen: bis sie da ist (oder der Abgleich scheitert) zaehlt die Zeit seit dem Start
+    startSync(true);
     if (!model.valid) teachIn();
     showStatusNow(5000);
   } else if (hal::wokeByButton()) {
@@ -398,6 +478,7 @@ void setup() {
 void loop() {
   static uint32_t lastSample = 0;
   M5.update();
+  pollSync();
 
   // Taste A
   if (M5.BtnA.pressedFor(BTN_WEB_MS)) ui::setRotation(DISP_ROT_FLAT);
@@ -435,7 +516,8 @@ void loop() {
   }
 
   // Schlafen?
-  bool busy = (int32_t)(uiUntil - millis()) > 0 || (int32_t)(awakeUntil - millis()) > 0 || M5.BtnA.isPressed();
+  bool busy = (int32_t)(uiUntil - millis()) > 0 || (int32_t)(awakeUntil - millis()) > 0 || M5.BtnA.isPressed() ||
+              syncPending;  // laeuft der Abgleich, bleibt der Stick wach (hoechstens kSyncMaxMs)
   if (!busy && tracker.settled()) goToSleep(false);
   if (!busy && millis() - sessionStart > SESSION_MAX_MS) goToSleep(true);
 }
